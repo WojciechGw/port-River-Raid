@@ -42,32 +42,87 @@ dane pod `$C000–$CFFF`; zachowuje bajty zmontowane dla Atari pod `$F000`.
 Wykonywane procedury mają przeniesione odwołania i osobną tabelę inicjalizacji.
 Kod Atari odpowiedzialny za raster nie jest wykonywany. Nie ma emulacji CPU Atari.
 
-VGA: canvas 320×240, pole gry na liniach 8–167, współrzędne logiczne 160×160.
+VGA: canvas 320×240, pole gry na liniach 21–180, współrzędne logiczne 160×160.
 Rzeka korzysta z oryginalnej kolejności bitów PF0/PF1/PF2, odbicia oraz
-tablic drogi. Bufor kołowy 320×192 w 4 bpp dopisuje jedynie nowe linie.
+tablic drogi. Bufor kołowy 40×192 przechowuje indeksy kafelków
+8×1 pikseli: jeden kafelek odpowiada bitowi playfield Atari. Dopisuje jedynie
+nowe linie, przesyłając 40 zamiast 160 bajtów na wiersz.
+Kafelki na styku lądu i wody dodają brązową skarpę od strony lądu,
+także na wyspach. Woda i maski kolizji zachowują te same granice.
 Sprite'y odtwarzają strumienie A/B, kolory wierszy, rozmiary TIA, odbicia,
 kopie eksplozji mostu i zawijanie samolotów na krawędzi. Panel wyświetla
 oryginalne bitmapy cyfr, paliwa i napisu Activision/copyright zamiast fontu VGA.
+W miejscu domu i drzewa z 2600 pojawiają się dwa szczyty górskie, wzorowane
+na XL i mieszczące się w dotychczasowym obszarze sprite'a. Ich maska kolizji
+odpowiada nowej sylwetce. Boczne pola panelu pokazują P1/P2, GAME i numer
+wariantu oraz BRIDGE z bieżącym poziomem; aktualizują tylko zmienione pola.
+Cyfry tych liczników są przygotowane przy starcie i wyświetlane przez trzy
+sprite'y w obszarze panelu, bez ponownego rysowania ich bitmap w klatce gry.
+Strumień A przypada na parzyste linie bloku, B na nieparzyste; ta kolejność
+zachowuje czytelne litery FUEL wycięte w bitmapie zbiornika.
+Most ma szerokość 32 pikseli logicznych i zajmuje zakres X 64–95, zgodny
+z przewężeniem rzeki. Pozycję szerokiego sprite'a skorygowano o jeden piksel
+względem wartości 63 przekazywanej przez oryginał do `CalcPosX`; ten sam
+początek wykorzystują rysowanie i kolizje.
+Panel zajmuje linie 182–218, z pojedynczą czarną linią oddzielającą go od gry.
+Wynik rozpoczyna się w wierszu 1 panelu, skala paliwa w 11, a życia i logo w 28.
+Cały obraz jest wyśrodkowany pionowo, z czarnymi marginesami po 21 linii.
 
 Program oblicza kolizje pikseli przed wywołaniem oryginalnej logiki,
 wypełniając jej flagi kolizji. Transfer linii i sprawdzanie sprite'ów z terenem
 wykonuje asembler. Wejście obsługuje USB HID i dwa gamepady. Zegar gry
-pochodzi z `RIA.vsync` przy 60 Hz. Pełne przygotowanie ekranu podczas startu
-i odradzania jest wyłączone z licznika pominiętych klatek.
+pochodzi z `RIA.vsync` przy 60 Hz. Licznik pominiętych klatek obejmuje
+wszystkie operacje po początkowej konfiguracji obrazu, również restart,
+odradzanie i zmianę gracza.
+
+Restart odtwarza początkowy, prosty korytarz szybką procedurą asemblerową.
+W pomiarze Release przy 8 MHz koszt odtwarzania terenu spadł z około 391 ms
+do 5–6 ms. Panel przesyła tylko kolumny zajęte przez cyfry, paliwo i logo;
+rysowanie glifów wykonuje asembler, a częstotliwości PSG korzystają z tabel
+przygotowanych przy starcie zamiast dzielenia w każdej klatce.
 
 PSG otrzymuje częstotliwości, głośność i rodzaj fali wynikające z oryginalnych
 rejestrów AUDC/AUDF/AUDV. Sekwencje efektów pochodzą z oryginału, lecz szum
 PSG nie odtwarza dokładnie generatorów wielomianowych TIA. RGB555 jest
-przybliżeniem barw NTSC, a nie analogowym modelem konkretnego telewizora.
+przybliżeniem barw dopasowanym do dostarczonych screenshotów, a nie
+analogowym modelem konkretnego telewizora.
 Interfejsy sprzętowe opisują [VGA](https://picocomputer.github.io/vga.html)
 i [RIA](https://picocomputer.github.io/ria.html).
+
+## Referencje obrazu
+
+Trzy bezstratne GIF-y w `original/Atari XL` są odniesieniem dla aktualnej
+palety i dekoracji. Ich płaskie kolory mają RGB: woda (83, 70, 255), ciemny
+ląd (0, 85, 16), jasny ląd (89, 158, 0), skarpa (85, 19, 0), panel
+(171, 171, 171). Statki mają czerwony kadłub i zieloną dolną część,
+zbiorniki różowe i białe pasy, helikoptery ciemny kadłub i złoty wirnik.
+Host zaokrągla kolory do RGB555; mapowanie ról kolorów w `src/graphics.h`
+zachowuje oryginalne przełączanie B&W i wygaszacz. Kolory nieobecne
+w screenshotach nadal korzystają z przybliżenia odcienia TIA.
+
+Dziesięć JPEG-ów w `original/Atari 2600` służy do porównywania sylwetek
+obiektów i podstawowego układu panelu. Logika i generator trasy pochodzą
+z 2600; ta wersja portu rozwija wygląd na podstawie XL, a nie odtwarza
+rastra ani reguł wersji XL 1:1.
+
+Skala paliwa pozostaje czarna dla obu graczy; ruchomy wskaźnik jest żółty.
+Screenshot 02 pokazuje czarny samolot, wynik i logo drugiego gracza.
+Odstępy pionowe panelu porównano ze screenshotami i procedurą `FinishDigits`.
+Lewy czarny pas blankingu HMOVE widoczny na obrazach Atari nie jest odtwarzany.
+Screenshoty pokazują pojedyncze stany gry, więc nie potwierdzają jeszcze
+zgodności faz ruchu, kolizji i animacji klatka po klatce.
 
 ## Weryfikacja i ograniczenia
 
 `python tests/emulator_checks.py` sprawdza rzeczywisty ROM w RP6502-EMU
 przy 8 MHz: wejście, pauzę, paliwo, trafienia, bonusowe życie, maksymalny
 wynik, generator, śmierć, odradzanie, trudność, zmianę gracza i restart.
-Scenariusz 1200 klatek z przyspieszaniem i strzelaniem mierzy pominięte VSYNC.
+Scenariusz 1200 klatek sprawdza przewijanie z przyspieszaniem i strzelaniem.
+Test terenu porównuje widoczne piksele kafelków, również skarp, z maskami
+kolizji na całej wysokości pola gry. Sprawdza też dopasowanie mostu do brzegów.
+Także pozostałe scenariusze kończące się w grze sprawdzają brak pominiętych
+VSYNC, w tym odradzanie, tankowanie i zmiana gracza. Opcjonalny profil faz
+klatki opisano w `tests/README.md`.
 Testy są wyciszone, więc nie potwierdzają jakości brzmienia.
 
 Pozostają odsłuch, porównanie rastra klatka po klatce z emulatorem Atari

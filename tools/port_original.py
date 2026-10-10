@@ -141,7 +141,7 @@ def generate(source):
     for label in ('shapePtr1aTab', 'shapePtr1bTab', 'ColorPtrTab', 'ColorTab',
                   'RoadColorTab', 'FuelTab0', 'FuelTab1', 'FuelTab2', 'FuelTab3',
                   'FuelTab4', 'ENABLTab', 'Copyright1', 'Copyright2',
-                  'Copyright3', 'Copyright4', 'Copyright5', 'Space', 'Copyright0'):
+                  'Copyright3', 'Copyright4', 'Copyright5', 'Space', 'Copyright0', 'Zero'):
         out += [f'.export _rr_{label}', f'_rr_{label} = reference::{label}-$3000']
     return "\n".join(out) + "\n"
 

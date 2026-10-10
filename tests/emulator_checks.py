@@ -5,6 +5,7 @@ the game. The original zero-page layout is deliberately retained at $80-$FF.
 """
 import argparse
 import re
+import struct
 import subprocess
 from pathlib import Path
 
@@ -36,6 +37,26 @@ def score(state):
     return value
 
 
+def check_terrain_pixels(config, terrain, tiles, river1, river2):
+    """Compare rendered pixels (including brown rims) with collision masks."""
+    origin_y = struct.unpack_from("<h", config, 4)[0]
+    for screen_y in range(21, 181):
+        n = (screen_y-origin_y) % 192
+        for x in range(160):
+            mirrored_x = x if x < 80 else 159-x
+            if mirrored_x < 16:
+                land = True
+            elif mirrored_x < 48:
+                land = bool(river1[n] & (128 >> ((mirrored_x-16)//4)))
+            else:
+                land = bool(river2[n] & (1 << ((mirrored_x-48)//4)))
+            tile = terrain[n*40+x//4]
+            # One logical pixel occupies both nibbles of one texture byte.
+            pixel_pair = tiles[tile*32+x%4]
+            assert ((pixel_pair >> 4) != 1) == land, f"Terrain/land mismatch at {x},{screen_y}"
+            assert ((pixel_pair & 15) != 1) == land, f"Terrain/land mismatch at {x},{screen_y}"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
@@ -49,6 +70,10 @@ def main():
 
     def case(name, commands, fill="random"):
         nonlocal count
+        # Allow the next loop to account for the last rendered frame, including
+        # full resets/respawns. The exit case has already returned to the OS.
+        if not commands[-1].startswith("expect-exit"):
+            commands = commands + ["run 2", "peek xram:0x009e 0 0"]
         script = output / f"{name}.script"
         script.write_text("\n".join(commands) + "\n", encoding="utf-8")
         process = subprocess.run([
@@ -65,7 +90,7 @@ def main():
         print(f"PASS {name}", flush=True)
         return process.stdout, dumps
 
-    boot = ["run 240", "peek xram:0x0080 0x52 2 3"]
+    boot = ["run 240", "peek xram:0x0080 0x52 3 3"]
     start = boot + ["press space", "run 140", "release space", "run 4",
                     "peek xram:0x0082 1", "peek xram:0x0084 3 1"]
     pause = start + ["press p", "run 3", "release p", "run 3", "peek xram:0x008b 1"]
@@ -87,6 +112,23 @@ def main():
     a, _ = case("title-random", boot + ["crc", f'shot "{(output / "title.png").as_posix()}"'])
     b, _ = case("title-zero", boot + ["crc"], "0")
     assert a == b, "Initial image depends on RAM contents"
+
+    # The tank lettering is three columns of transparent pixels inside its
+    # opaque body. Check recognizable glyphs in the actual uploaded 4-bpp image.
+    _, images = case("fuel-lettering", boot + ["dump xram:0x9400 128"])
+    tank = images[-1]
+    for letter, top, glyph in (
+        ("F", 7, (0b111, 0b100, 0b110, 0b100, 0b100)),
+        ("U", 13, (0b101, 0b101, 0b101, 0b111)),
+        ("E", 18, (0b111, 0b100, 0b110, 0b100, 0b111)),
+        ("L", 24, (0b100, 0b100, 0b100, 0b100, 0b111)),
+    ):
+        for y, expected in enumerate(glyph, top):
+            holes = 0
+            for x in range(2, 5):
+                color = (tank[y*4+x//2] >> (0 if x&1 else 4)) & 15
+                holes = (holes << 1) | (color == 0)
+            assert holes == expected, f"Broken {letter} in FUEL, row {y-top}"
 
     _, states = case("keyboard-acceleration-and-pause", start + dump + [
         "press right", "run 4"] + dump + ["run 24", "release right", "run 2"] + dump + [
@@ -114,6 +156,41 @@ def main():
     _, states = case("exact-refuelling", fixture + object_at(0, 10) + ["run 1"] + dump + resume + dump)
     elapsed = int.from_bytes(states[1][14:16], "little")-int.from_bytes(states[0][14:16], "little")
     assert int.from_bytes(states[1][6:8], "little")-int.from_bytes(states[0][6:8], "little") == elapsed*480
+
+    # Let the original generator build a road, then compare the actual sprite
+    # span with the water pixels in the uploaded circular terrain buffer.
+    _, buffers = case("bridge-bank-alignment", boot + [
+        "press p", "run 3", "release p", "run 3", poke(0xa0, [0]*6),
+        poke(0xb5, [254, 2, 255, 255]), poke(0x8b, [31, 255]),
+        poke(0xb9, 1), poke(0xbc, 12), poke(0x88, [12, 0]), poke(0xc6, 0),
+        "press p", "run 35", "release p", "run 1", "press p", "run 3",
+        "release p", "run 3", "dump 0xa0 6", "dump xram:0x0300 100",
+        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x9000 512",
+        "dump xram:0x2700 416", f'dump 0x{sym["river1"]:04x} 192',
+        f'dump 0x{sym["river2"]:04x} 192',
+        f'shot "{(output / "bridge.png").as_posix()}"'])
+    shapes, sprites, config, terrain, bridge, tiles, river1, river2 = buffers
+    check_terrain_pixels(config, terrain, tiles, river1, river2)
+    block = shapes.index(8)
+    x, y, _, _, size, options = struct.unpack_from("<hhHHBB", sprites, (block+2)*10)
+    image_width = ((size & 15)+1)*4
+    screen_width = image_width*(2 if options & 64 else 1)
+    terrain_y = struct.unpack_from("<h", config, 4)[0]
+    row_offset = ((y+12-terrain_y) % 192)*40
+    water = [i*4+p for i, tile in enumerate(terrain[row_offset:row_offset+40])
+             if tile == 1 for p in range(4)]
+    assert water == list(range(64, 96)), "Original road has unexpected bank positions"
+    assert (x, x+screen_width) == (water[0]*2, (water[-1]+1)*2), "Bridge misses a river bank"
+    body = bridge[12*image_width//2:13*image_width//2]
+    assert all((pixel >> 4) and (pixel & 15) for pixel in body), "Gap in bridge deck"
+
+    # F3 selects straight missiles, so guidance cannot pull a missed shot
+    # back into the bridge on a later frame.
+    for missile_x, expected in ((63, 0), (95, 500)):
+        _, states = case(f"bridge-edge-{missile_x}", fixture + clear_score +
+            object_at(1, 8, 63) + [poke(0xb2, 43), poke(0xf5, missile_x),
+                "press f3", "run 2", "release f3", "run 2"] + resume + dump)
+        assert score(states[-1]) == expected, "Bridge collision disagrees with its visible edge"
 
     for kind, points in ((4, 100), (5, 60), (7, 30), (8, 500), (10, 80)):
         _, states = case(f"score-object-{kind}", fixture + clear_score + object_at(1, kind) + [
@@ -177,6 +254,12 @@ def main():
         "release up space", "run 4"] + dump + [f'shot "{(output / "gameplay.png").as_posix()}"'])
     assert int.from_bytes(states[-1][30:32], "little") == 0, "Skipped VSYNC at 8 MHz"
     assert states[-1][5] >= 2
+    # A restart and palette change can redraw terrain, score, fuel and logo
+    # together. Exercise that combination after some gameplay, repeatedly.
+    commands = start + ["press up space", "run 600", "release up space", "run 4"]
+    for _ in range(6):
+        commands += ["press r f1", "run 4", "release r f1", "run 12"]
+    case("restart-and-palette-performance", commands)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

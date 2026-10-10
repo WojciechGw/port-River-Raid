@@ -7,9 +7,11 @@ Activision, 1982; projektantka Carol Shaw.
 
 Oryginalne procedury 6502 odpowiadają za trasę, przeciwników, przyspieszenie,
 paliwo, punktację, dodatkowe życia, odradzanie w zapamiętanej sekcji i grę
-dla dwóch osób. Grafika korzysta z oryginalnych bitmap i kolorów wierszy;
-panel pokazuje oryginalne cyfry i wskaźnik paliwa. Dźwięk przekłada rejestry
-TIA na PSG. Barwy RGB oraz szum są przybliżone; zakres zgodności i ograniczenia
+dla dwóch osób. Grafika łączy oryginalne bitmapy z paletą i dekoracjami
+inspirowanymi screenshotami Atari XL: brązowe skarpy, góry i wyraźniejsze
+kolory obiektów. Panel pokazuje oryginalne cyfry i wskaźnik paliwa oraz
+gracza, wariant gry i numer mostu. Dźwięk przekłada rejestry TIA na PSG.
+RGB555 oraz szum pozostają przybliżone. Zakres zgodności i ograniczenia
 opisuje [PORTING.md](PORTING.md).
 
 ## Budowanie i uruchamianie
@@ -62,13 +64,15 @@ Skrypt testuje rzeczywisty ROM przy 8 MHz bez okna. Sprawdza sterowanie,
 pauzę, trzy rodzaje gamepadów, dokładne spalanie i tankowanie, punktację,
 bonusowe życie, maksymalny wynik, kolizje, odradzanie, kierowanie pociskiem,
 zmianę gracza, restart, oryginalny LFSR i inicjalizację RAM.
-Sprawdza też pominięte klatki w scenariuszu przewijania i strzelania.
+Sprawdza też brak pominiętych VSYNC podczas przewijania i strzelania,
+tankowania, odradzania oraz zmiany gracza.
 Zrzuty ekranu i scenariusze trafiają do `build/cc65/release/checks`.
 Opis diagnostyki: [tests/README.md](tests/README.md).
 
 ## Kod
 
 - `src/main.c`: konfiguracja RIA/VGA/PSG, raster, wejście i kolizje.
+- `src/graphics.h`: paleta wzorowana na Atari XL, góry i litery panelu.
 - `src/riverraid.asm`: szybki transfer linii i kolizje sprite'ów z terenem.
 - `src/riverraid.cfg`: mapa RAM z zarezerwowaną stroną zerową oryginału.
 - `src/xram.h`: mapa XRAM i sprawdzane podczas kompilacji struktury PIX.
