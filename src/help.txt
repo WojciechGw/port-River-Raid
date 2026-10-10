@@ -1,2 +1,12 @@
-This information is displayed with the HELP and INFO monitor commands.
-Please change it to suit your project.
+River Raid - Picocomputer 6502 port with native original game rules.
+Original game: Activision (1982), designer Carol Shaw.
+Reference disassembly and annotations: Thomas Jentzsch.
+
+Player 1: arrows, Space/Enter. Player 2: WASD, left Ctrl.
+In single-player mode, both keyboard layouts work.
+F1: color/B&W. F2: select one/two players.
+F3/F4: toggle guided/straight missiles for player 1/2.
+Space or Enter: fire / start. P: pause. R: restart. Escape: exit.
+Two gamepads: D-pad or left stick, face buttons to fire,
+Start to pause, Select to restart.
+Fly over fuel tanks to refuel. Destroy the bridge to finish a section.
