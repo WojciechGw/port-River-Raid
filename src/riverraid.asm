@@ -19,7 +19,48 @@
 .import _tia_palette
 .export _demo_tick
 .import _ready, _demo_wait
+.export _present_frame
+.import _terrain, _sprites, _footer_offset
 .segment "CODE"
+
+; Present the prepared world immediately after VSYNC, before the VGA reaches
+; RIVER_TOP. Only Y changes in the tile config; dimensions/data stay fixed.
+; 160 sprite bytes + Y take approximately 0.3 ms at 8 MHz. Never publish
+; the scroll origin halfway through expensive terrain/collision processing.
+_present_frame:
+    lda #1
+    sta RIA_STEP0
+    lda #$04
+    sta RIA_ADDR0
+    lda #$02
+    sta RIA_ADDR0+1
+    lda _terrain+4
+    sta RIA_RW0
+    lda _terrain+5
+    sta RIA_RW0
+    lda #0
+    sta RIA_ADDR0
+    lda #$03
+    sta RIA_ADDR0+1
+    ldy #0
+@sprite:
+    lda _sprites,y
+    sta RIA_RW0
+    iny
+    cpy #160
+    bne @sprite
+    lda #$62
+    sta RIA_ADDR0
+    lda #$02
+    sta RIA_ADDR0+1
+    sec
+    lda #0
+    sbc _footer_offset
+    sta RIA_RW0
+    lda #0
+    sbc _footer_offset+1
+    sta RIA_RW0
+    rts
 
 ; A = elapsed 60 Hz VSYNCs, including missed frames. Called after input,
 ; before native rules and footer rendering, so both start on the same frame.

@@ -18,6 +18,10 @@ else()
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
     set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
     set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
+    set(RIVER_COVER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/cover.bin)
+    set(RIVER_COVER_FADES ${CMAKE_CURRENT_BINARY_DIR}/cover_fade.bin)
+    set(RIVER_COVER_PROMPT ${CMAKE_CURRENT_BINARY_DIR}/cover_prompt.bin)
+    set(RIVER_COVER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/cover.inc)
     add_custom_command(OUTPUT ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_footer.py
             ${CMAKE_CURRENT_SOURCE_DIR}/src/demo-footer.json
@@ -25,13 +29,22 @@ else()
             ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
         DEPENDS src/demo-footer.json src/graphics.h tools/make_demo_footer.py
         VERBATIM)
+    add_custom_command(OUTPUT ${RIVER_COVER_IMAGE} ${RIVER_COVER_FADES}
+        ${RIVER_COVER_PROMPT} ${RIVER_COVER_INCLUDE}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_cover.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/cover.bmp
+            ${RIVER_COVER_IMAGE} ${RIVER_COVER_FADES} ${RIVER_COVER_PROMPT} ${RIVER_COVER_INCLUDE}
+            ${RIVER_FOOTER_IMAGE}
+        DEPENDS assets/cover.bmp tools/make_cover.py ${RIVER_FOOTER_IMAGE}
+        VERBATIM)
     add_custom_command(OUTPUT ${RIVER_CORE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/port_original.py
             ${CMAKE_CURRENT_SOURCE_DIR}/original/riverraid.asm ${RIVER_CORE}
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverride
-        src/riverraid.asm src/main.c ${RIVER_CORE} ${RIVER_FOOTER_HEADER})
+        src/riverraid.asm src/cover.asm src/main.c ${RIVER_CORE}
+        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE})
     target_link_options(riverride PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverride APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
@@ -44,7 +57,14 @@ else()
     endif()
     rp6502_map(riverride src/xram.h "XRAM_.*")
     rp6502_asset(riverride help src/help.txt)
-    rp6502_asset(riverride XRAM(XRAM_DEMO_FOOTER_IMAGE) ${RIVER_FOOTER_IMAGE})
+    # Named assets are read from ROM: on demand; they are not preloaded to XRAM.
+    rp6502_asset(riverride cover.bin ${RIVER_COVER_IMAGE})
+    rp6502_asset(riverride cover-fade.bin ${RIVER_COVER_FADES})
+    rp6502_asset(riverride cover-prompt.bin ${RIVER_COVER_PROMPT})
+    rp6502_asset(riverride demo-footer.bin ${RIVER_FOOTER_IMAGE})
+    # Splash helpers use the free CPU RAM above the original 4 KiB reference ROM.
+    rp6502_byproducts(riverride ${CMAKE_CURRENT_BINARY_DIR}/riverride.splash)
+    rp6502_asset(riverride RAM(0xD000) ${CMAKE_CURRENT_BINARY_DIR}/riverride.splash)
     rp6502_byproducts(riverride ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
     rp6502_asset(riverride RAM(0xC000) ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
     rp6502_executable(riverride DATA 0x0300 RESET 0x0300)

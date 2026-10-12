@@ -143,6 +143,31 @@ połączenie z literą A. Zaczyna się w X 48 canvasu, trzy wiersze pod górą
 stopki. Osobny sprite i paleta zachowują kolory GIF-u po zaokrągleniu
 do RGB555; przełącznik B&W i wygaszacz stosują oryginalne role kolorów.
 
+Przed inicjalizacją gry `src/cover.asm` wyświetla okładkę `assets/cover.bmp`.
+Bitmapa 320×180 zachowuje indeksy i wszystkie kolory palety, zaokrąglone
+do RGB555. Zajmuje $1000–$F0FF XRAM; konfiguracja jest w $0280, paleta
+w $0400, a bufor kolejnej palety w $0600. Obraz jest wyśrodkowany w Y=30
+na canvasie 320×240. `tools/make_cover.py` przygotowuje 64 poziomy jasności
+w obie strony.
+Okładka, palety i bitmapa napisu są pakowane jako nazwane zasoby `.rp6502`:
+`cover.bin`, `cover-fade.bin` i `cover-prompt.bin`. Program otwiera je na dysku
+`ROM:` i czyta przez READ_XRAM; loader nie ładuje grafiki okładki automatycznie.
+Palety są czytane do bufora, a po VSYNC kopiowane
+do palety wyświetlanej, przed pierwszą linią okładki. Rozjaśnianie i wygaszanie
+trwają po około sekundzie. Pod grafiką, w X=120, Y=222, jest wyśrodkowana
+bitmapa „PRESS ANY KEY”: litery 5×7 w polu 80×8, białe na czarnym tle.
+Osobna paleta w $0850 i bitmapa w $0800 pozostawiają kolory okładki bez zmian.
+Konfiguracja w $02A0 przesuwa napis poza ekran co 30 VSYNC, co daje pół sekundy
+widoczności i pół sekundy przerwy. Napis pojawia się po rozjaśnieniu i znika
+po naciśnięciu klawisza, przed wygaszaniem.
+Po rozjaśnieniu program czeka na dowolny klawisz HID,
+również funkcyjny lub modyfikator; bity stanu LED nie zamykają okładki.
+Klawisz zamykający ekran jest konsumowany wraz ze zwolnieniem, aby nie
+uruchamiał dodatkowo sterowania grą. Kod i jego kilka bajtów roboczych leżą
+w wolnej pamięci CPU od $D000, za oryginalnym ROM-em; nie zajmują stosu ani
+buforów gry. Po wygaszeniu program przywraca pasek stopki z zasobu ROM,
+a inicjalizacja gry odtwarza pozostałe zasoby w ponownie wykorzystywanym XRAM.
+
 W trybie pokazowym stopkę zastępuje napis przewijany w lewo o jeden piksel
 canvasu na klatkę. Tekst i czytelne glify są w `src/demo-footer.json`.
 Po wyświetleniu pierwszej planszy licznik 180 VSYNC (3 sekundy) wstrzymuje
@@ -154,8 +179,8 @@ Krój odtwarza grube litery 6×6 z próbek Atari XL/5200, w komórkach szerokoś
 dolne części małych liter.
 TM ma podniesione glify 3×5 i 5×5, bez odstępu przed znakiem. W miejscu `{Activision}`
 wstawiana jest ta sama bitmapa logo z `src/graphics.h`. Generator
-`tools/make_demo_footer.py` przygotowuje cały pasek przy budowaniu ROM-u
-i ładuje go do XRAM $3800. VGA przewija bitmapę z zawijaniem poziomym,
+`tools/make_demo_footer.py` przygotowuje cały pasek przy budowaniu ROM-u;
+program ładuje go do XRAM $3800 po zamknięciu okładki. VGA przewija bitmapę z zawijaniem poziomym,
 bez rysowania liter przez CPU w każdej klatce. Osobna paleta zachowuje
 jasnoszary kolor tekstu także przy wygaszaczu. Pauza zatrzymuje napis;
 rozpoczęcie gry przywraca nieruchome logo, a koniec gry przywraca przewijanie.
@@ -166,6 +191,13 @@ wykonuje asembler. Wejście obsługuje USB HID i dwa gamepady. Zegar gry
 pochodzi z `RIA.vsync` przy 60 Hz. Licznik pominiętych klatek obejmuje
 wszystkie operacje po początkowej konfiguracji obrazu, również restart,
 odradzanie i zmianę gracza.
+
+Pozycja przewijania, lista obiektów i przesunięcie napisu są przygotowywane
+w RAM podczas poprzedniej klatki. Zaraz po VSYNC procedura asemblerowa
+`present_frame` publikuje je razem w XRAM w około 0,3 ms przy 8 MHz,
+przed dotarciem obrazu do pierwszej linii rzeki. Obliczenia terenu i kolizji
+nie opóźniają tej publikacji. Sam brak pominiętych VSYNC nie wyklucza
+rozrywania obrazu, gdy pozycję tła zmienia się w trakcie wyświetlania klatki.
 
 Restart odtwarza początkowy, prosty korytarz szybką procedurą asemblerową.
 W pomiarze Release przy 8 MHz koszt odtwarzania terenu spadł z około 391 ms

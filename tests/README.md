@@ -9,6 +9,18 @@ Scenariusze uruchamiają rzeczywisty kod CPU przy 8 MHz, bez okna i dźwięku.
 Sprawdzają także komunikaty błędów emulatora, ponieważ niektóre wersje
 zwracają kod zero mimo błędu skryptu. Pliki skryptów i PNG trafiają do
 `build/cc65/release/checks`.
+Scenariusze `cover-*` porównują bitmapę z `assets/cover.bmp`, sprawdzają
+wszystkie poziomy palety fade in/out oraz zachowanie okładki podczas
+oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
+i napisu oraz brak automatycznego wczytywania okładki do XRAM.
+`cover-prompt-blink` sprawdza pozycję, mały biały napis, zmianę widoczności
+co 30 klatek, niezmienność palety okładki oraz ukrycie tekstu podczas fade.
+`cover-prompt-on.png` i `cover-prompt-off.png` pokazują obie fazy.
+Testy obejmują klawisze zwykłe, funkcyjne, modyfikatory,
+Escape, przytrzymanie przed rozjaśnieniem, stan diod klawiatury oraz pamięć
+wypełnioną zerami, $FF i losowo. Klawisz zamykający okładkę nie może uruchomić
+sterowania grą. Zrzuty `cover-full.png`, `cover-half.png` i `cover-black.png`
+pokazują kolejne fazy. Pozostałe scenariusze zamykają okładkę przed testowaniem gry.
 Scenariusze `bridge-difficulty-*` sprawdzają cykl F3: 1 → 5 → 20 → 50 → 1,
 brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD, restart z pauzy,
 zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 50.
@@ -18,7 +30,7 @@ zawijanie po całym przebiegu, jasnoszarą paletę także po aktywacji wygaszacz
 podniesione i mniejsze TM, zatrzymanie przy pauzie oraz przejście między
 przewijanym napisem w pokazie i nieruchomym logo podczas gry.
 Scenariusze `demo-startup-*` i `demo-start-before-delay` sprawdzają
-trzysekundowe oczekiwanie, wspólny start napisu i ruchu rzeki, pauzę licznika
+trzysekundowe oczekiwanie po zamknięciu okładki, wspólny start napisu i ruchu rzeki, pauzę licznika
 oraz rozpoczęcie gry przed upływem oczekiwania.
 Scenariusz `fuel-lettering` odczytuje przesłaną do XRAM bitmapę zbiornika
 i sprawdza kształty liter F, U, E oraz L w jej przezroczystych pikselach.
@@ -76,6 +88,10 @@ Każdy scenariusz kończący się w grze sprawdza również zerowy licznik pomin
 VSYNC; pomiar obejmuje restart, odradzanie, tankowanie i zmianę gracza.
 `two-player-switch` sprawdza także nieprzezroczystą czarną paletę samolotu
 drugiego gracza po przełączeniu.
+Scenariusz `vsync-world-presentation` sprawdza buforowanie metadanych obrazu:
+pozycja tła i cała lista obiektów są publikowane przy następnej klatce,
+wraz z przesunięciem napisu, a przygotowanie kolejnego obrazu nie zmienia
+deskryptorów wyświetlanej już klatki.
 Test `scroll-and-performance` wykonuje dodatkowo 1200 klatek z przyspieszaniem
 i ciągłym strzelaniem. `restart-and-palette-performance` łączy odtwarzanie
 terenu z przełączaniem palety po rozgrywce. Wymagany jest zoptymalizowany
@@ -112,6 +128,13 @@ Każdy przyrost jednostki przewijania korzysta z oryginalnego akumulatora.
 Paliwo spala się o 32 na krok; tankowanie z pustą przestrzenią w zbiorniku
 daje netto 480 na krok. Oryginalny wynik jest zapisany jako wskaźniki bitmap
 cyfr, dlatego protokół nie przechowuje go jako liczby 32-bitowej.
+
+## Diagnostyka okładki XRAM `$00B0`
+
+Pierwszy bajt określa fazę: 1 rozjaśnianie, 2 oczekiwanie na klawisz,
+3 wygaszanie, 4 czerń i oczekiwanie na zwolnienie klawisza, 0 przejście do gry.
+Drugi bajt to wyświetlany poziom jasności 0–63. Sygnatura gry w `$0080`
+pozostaje zerowa do przygotowania pierwszej planszy.
 
 ## Opcjonalny profil czasu
 

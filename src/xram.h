@@ -33,6 +33,14 @@ typedef struct {
 #define XRAM_STATE 0x0080
 /* Optional RIVER_PROFILE maxima; see tests/README.md. */
 #define XRAM_TIMING 0x00A0
+/* Startup-only state: phase (0 game, 1 in, 2 wait, 3 out, 4 black), level 0..63.
+ * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
+ * pixels before game initialization. Game graphics reuse these regions. */
+#define XRAM_COVER_STATE 0x00B0
+/* Startup-only prompt, before the game reuses these XRAM regions. */
+#define XRAM_COVER_PROMPT_CONFIG 0x02A0
+#define XRAM_COVER_PROMPT_IMAGE 0x0800
+#define XRAM_COVER_PROMPT_PALETTE 0x0850
 #define XRAM_PALETTE 0x0100
 #define XRAM_PSG 0x0180
 #define XRAM_TERRAIN_CONFIG 0x0200

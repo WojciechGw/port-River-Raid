@@ -8,6 +8,7 @@ import math
 import re
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -242,11 +243,11 @@ def main():
     output.mkdir(exist_ok=True)
     count = 0
 
-    def case(name, commands, fill="random"):
+    def case(name, commands, fill="random", gameplay=True):
         nonlocal count
         # Allow the next loop to account for the last rendered frame, including
         # full resets/respawns. The exit case has already returned to the OS.
-        if not commands[-1].startswith("expect-exit"):
+        if gameplay and not commands[-1].startswith("expect-exit"):
             commands = commands + ["run 2", "peek xram:0x009e 0 0"]
         script = output / f"{name}.script"
         script.write_text("\n".join(commands) + "\n", encoding="utf-8")
@@ -264,7 +265,9 @@ def main():
         print(f"PASS {name}", flush=True)
         return process.stdout, dumps
 
-    title = ["wait xram:0x0080 82 240", "run 2", "peek xram:0x0080 0x52 3 3"]
+    dismiss_cover = ["wait xram:0x00b0 2 180", "press z", "run 3", "release z",
+                     "wait xram:0x00b0 0 120"]
+    title = dismiss_cover + ["wait xram:0x0080 82 240", "run 2", "peek xram:0x0080 0x52 3 3"]
     boot = title + [f'wait 0x{sym["ready"]:04x} 2 180', "run 60",
                     "peek xram:0x0080 0x52 3 3"]
     start = boot + ["press space", "run 140", "release space", "run 4",
@@ -278,6 +281,105 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    # Cover pixels and RGB555 endpoints are checked directly against the BMP,
+    # not just the converter's output. Check every displayed fade step and
+    # that holding a gameplay key across dismissal cannot start the game.
+    bmp=(ROOT / "assets/cover.bmp").read_bytes()
+    offset=struct.unpack_from("<I",bmp,10)[0]
+    dib,w,h,_,_=struct.unpack_from("<IiiHH",bmp,14)
+    rows=[bmp[offset+y*320:offset+(y+1)*320] for y in range(abs(h))]
+    expected_pixels=b"".join(reversed(rows) if h>0 else rows)
+    rgb=[tuple(v>>3 for v in bmp[14+dib+i*4:17+dib+i*4]) for i in range(256)]
+    # Use the SDK's ROM parser to verify these are named files inside the
+    # cartridge, loaded on demand rather than prepopulated XRAM chunks.
+    sys.path.insert(0,str(ROOT / "tools"))
+    from rp6502 import ROM
+    rom=ROM()
+    rom.add_rom_file(str(build / "riverride.rp6502"))
+    assets=dict(rom.assets)
+    assert assets["cover.bin"]==expected_pixels
+    assert assets["cover-fade.bin"]==(build / "cover_fade.bin").read_bytes()
+    assert assets["cover-prompt.bin"]==(build / "cover_prompt.bin").read_bytes()
+    assert not any(0x11000<=a<0x1f100 for a in rom.data), "Cover was preloaded to XRAM"
+
+    def cover_palette(level):
+        return b"".join(struct.pack("<H", (r*level//63) | ((g*level//63)<<6) |
+                     ((b*level//63)<<11) | 32) for b,g,r in rgb)
+
+    commands=["wait xram:0x00b0 1 180"]
+    for level in range(1,64):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+    commands += ["wait xram:0x00b0 2 3", "dump xram:0x0280 14",
+        "dump xram:0x1000 57600", "run 2", "mark", "run 240", "expect-same",
+        # Lock LED bits must not be interpreted as held keyboard keys.
+        "lock num", "lock caps", "lock scroll", "run 10", "peek xram:0x00b0 2",
+        f'shot "{(output / "cover-full.png").as_posix()}"',
+        "press space", "wait xram:0x00b0 3 3"]
+    for level in reversed(range(64)):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+        if level==32:
+            commands += [f'shot "{(output / "cover-half.png").as_posix()}"']
+    commands += ["wait xram:0x00b0 4 3", "run 2", "mark", "run 20", "expect-same",
+        f'shot "{(output / "cover-black.png").as_posix()}"', "release space",
+        "wait xram:0x0080 82 240", "run 2", f'peek 0x{sym["ready"]:04x} 1',
+        f'peek 0x{sym["start_level"]:04x} 1', "peek xram:0x008b 0"]
+    _, buffers=case("cover-fades-and-wait",commands)
+    assert buffers[:63]==[cover_palette(i) for i in range(1,64)], "Fade-in palette/frame mismatch"
+    assert struct.unpack("<BBhhhhHH",buffers[63])==(0,0,0,30,320,180,0x1000,0x0400)
+    assert buffers[64]==expected_pixels, "Cover pixels differ from original BMP"
+    assert buffers[65:]==[cover_palette(i) for i in reversed(range(64))], "Fade-out palette/frame mismatch"
+
+    _, buffers=case("cover-prompt-blink",["wait xram:0x00b0 1 180",
+        "peek xram:0x02a4 0 255", "wait xram:0x02a4 222 90", "run 2",
+        "dump xram:0x02a0 14", "dump xram:0x0800 80", "dump xram:0x0850 4",
+        "dump xram:0x0400 512", "mark",
+        f'shot "{(output / "cover-prompt-on.png").as_posix()}"',
+        "run 30", "expect-changed", "peek xram:0x02a4 0 255",
+        f'shot "{(output / "cover-prompt-off.png").as_posix()}"',
+        "dump xram:0x0400 512", "run 30", "expect-same", "peek xram:0x02a4 222 0",
+        "press q", "wait xram:0x00b0 3 3", "peek xram:0x02a4 0 255",
+        "release q", "wait xram:0x0080 82 240", "run 2"])
+    config,bitmap,palette,colors_on,colors_off=buffers
+    assert struct.unpack("<BBhhhhHH",config)==(0,0,120,222,80,8,0x0800,0x0850)
+    assert bitmap==assets["cover-prompt.bin"] and any(bitmap) and not any(bitmap[-10:])
+    assert palette==struct.pack("<HH",32,0xffff), "Prompt is not opaque white on black"
+    assert colors_on==colors_off, "Blink modified the cover palette"
+
+    # Verify arbitrary, function and modifier keys, Escape and a key held
+    # before fade-in; consumed keys must not trigger the game controls.
+    for key in ("q","f3","p","escape","lctrl"):
+        case(f"cover-key-{key}",["wait xram:0x00b0 2 180", f"press {key}", "run 3",
+            f"release {key}", "wait xram:0x0080 82 240", "run 2",
+            f'peek 0x{sym["ready"]:04x} 1', f'peek 0x{sym["start_level"]:04x} 1',
+            "peek xram:0x008b 0"])
+    case("cover-held-before-fade",["press enter", "wait xram:0x00b0 3 180",
+        "wait xram:0x00b0 4 90", "run 3", "peek xram:0x0080 0",
+        "release enter", "wait xram:0x0080 82 240", "run 2",
+        f'peek 0x{sym["ready"]:04x} 1'])
+    for fill in ("0","255"):
+        case(f"cover-wait-fill-{fill}",["wait xram:0x00b0 2 180", "run 2", "mark",
+            "run 120", "expect-same", "peek xram:0x00b0 2", "peek xram:0x00b1 63"],
+            fill=fill,gameplay=False)
+
+    # Staging must not alter the live VGA descriptors until the next VSYNC.
+    # The renderer then prepares the following frame; it must not overwrite
+    # descriptors already being scanned out during the displayed frame.
+    _, buffers=case("vsync-world-presentation",fixture+["run 2",
+        "dump xram:0x0200 16", "dump xram:0x0300 10",
+        poke(0xb3,90), poke(sym["ring_top"],17), "dump xram:0x0200 16",
+        "dump xram:0x0300 10", "run 1",
+        f'dump 0x{sym["terrain"]:04x} 16', f'dump 0x{sym["sprites"]:04x} 10',
+        "dump xram:0x0200 16", "dump xram:0x0300 10",
+        "run 1", "dump xram:0x0200 16", "dump xram:0x0300 10"])
+    assert buffers[0]==buffers[2], "Changing native terrain altered live VGA descriptors"
+    assert buffers[1]==buffers[3]==buffers[7], "Preparing sprites altered the displayed frame"
+    # The script can stop during the short VSYNC copy: Y is written before
+    # sprites. Allow that transient in the top blank lines, before the river.
+    assert buffers[6] in (buffers[0],buffers[4])
+    assert buffers[4]==buffers[8] and buffers[5]==buffers[9], "World descriptors were not presented together"
+    assert struct.unpack_from("<h",buffers[4],4)[0]==4
+    assert struct.unpack_from("<h",buffers[5],0)[0]==180
 
     footer=(build / "demo_footer.bin").read_bytes()
     width=len(footer)//8

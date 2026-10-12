@@ -50,6 +50,8 @@ void rr_step(void);
 void rr_tank_bonus(void);
 void rr_tank_crash(void);
 void __fastcall__ demo_tick(uint8_t vsyncs);
+void present_frame(void);
+void show_cover(void);
 void __fastcall__ write_terrain_row(unsigned address);
 void __fastcall__ write_jet_image(unsigned native_address);
 void __fastcall__ write_hud_span(unsigned address);
@@ -70,14 +72,14 @@ uint8_t hud_column, hud_length;
 uint8_t reset_tiles[512];
 uint8_t bank_half[20], tile_mirror[TERRAIN_TILE_COUNT];
 /* One 8-pixel tile per Atari PF bit; trim seven rows to make it one line high. */
-static tile_config_t terrain = {0,1,0,RIVER_TOP,TERRAIN_COLUMNS,RIVER_RING,
+tile_config_t terrain = {0,1,0,RIVER_TOP,TERRAIN_COLUMNS,RIVER_RING,
     XRAM_TERRAIN,XRAM_PALETTE,XRAM_TILES};
 static bitmap_config_t hud_bitmap = {0,0,0,HUD_TOP,320,HUD_HEIGHT,XRAM_HUD,XRAM_PALETTE};
 static const bitmap_config_t demo_footer = {1,0,0,HUD_FOOTER_Y,DEMO_FOOTER_WIDTH,8,
     XRAM_DEMO_FOOTER_IMAGE,XRAM_DEMO_FOOTER_PALETTE};
-static uint16_t footer_offset;
+uint16_t footer_offset;
 static uint8_t shown_demo=255;
-static sprite_t sprites[SPRITE_COUNT];
+sprite_t sprites[SPRITE_COUNT];
 static sprite_t hud_sprites[HUD_SPRITE_COUNT];
 static oscillator_t sound[8];
 static uint8_t masks[OBJECT_IMAGE_COUNT][32], sprite_colors[OBJECT_IMAGE_COUNT][16];
@@ -742,7 +744,7 @@ static void hud_details(void)
     }
     if (demo && ready!=1 && !paused) {
         if (++footer_offset==DEMO_FOOTER_WIDTH) footer_offset=0;
-        xram0_poke16(XRAM_DEMO_FOOTER_CONFIG+2,-footer_offset);
+        /* Scroll with the prepared world at the next VSYNC. */
     }
     if (shown_level!=level || shown_variant!=VAR) {
         /* Digit images are prepared once. Three sprites avoid rasterizing
@@ -852,7 +854,8 @@ static void render(void)
         }
     }
     terrain.y_pos_px=RIVER_TOP-ring_top;
-    upload(XRAM_TERRAIN_CONFIG,&terrain,sizeof(terrain)); upload(XRAM_SPRITES,sprites,sizeof(sprites));
+    /* World position and sprites stay in RAM until the next VSYNC. Publish
+     * them together before doing any input, collision or terrain work. */
     if (palette_mask!=G(0x86) || palette_xor!=G(0x85)) refresh_palettes();
     /* The player switch changes only the jet, not every world palette. */
     else if (palette_player!=PLAYER) refresh_jet_palette();
@@ -983,9 +986,10 @@ static uint8_t configure_video(void)
         for (i=0;i<4;++i) draw_glyph(HUD_GAME_X+i*HUD_GAME_PITCH,bitmap_row(game_label[i][y]));
         write_hud_span(XRAM_HUD+(uint16_t)(HUD_GAME_Y+y)*RIVER_WIDTH+HUD_GAME_X);
     }
-    /* The expanded assets can span a VSYNC during startup. Publish valid
-     * tile dimensions before enabling the plane, even with zero-filled XRAM. */
+    /* Prepare the entire first frame before enabling its planes. XRAM still
+     * contains cover pixels, so even a partially initialized scene can flash. */
     upload(XRAM_TERRAIN_CONFIG,&terrain,sizeof(terrain));
+    rebuild_terrain(); render(); present_frame();
     if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),SPRITE_COUNT-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
@@ -1001,6 +1005,7 @@ int main(void)
 {
     uint8_t last_vsync,now,delta,input,controls,old_offset,old_intro,scroll,y;
     RIA.step0=1; RIA.step1=1;
+    show_cover();
     memset((void*)0x200,0,256); G(0x282)=switches; rr_init(); G(0x86)=255;
     /* Prepare the original title scene before showing it, so the river is
      * stationary throughout the startup delay. No joystick is held. */
@@ -1008,11 +1013,12 @@ int main(void)
     while (MODE!=255) rr_step();
     xram0_set(XRAM_PSG,0,64);
     if (!configure_video()) return 1;
-    rebuild_terrain(); render(); last_vsync=RIA.vsync;
+    last_vsync=RIA.vsync;
     for (;;) {
         do {now=RIA.vsync;} while (now==last_vsync);
         delta=now-last_vsync; if (delta>1) skipped_frames+=delta-1;
         last_vsync=now;
+        present_frame();
 #ifdef RIVER_PROFILE
         timing_start=timing_stamp=(uint16_t)ria_attr_get(RIA_ATTR_CLK_RUN_MS);
 #endif

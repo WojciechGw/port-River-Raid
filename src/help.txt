@@ -1,6 +1,7 @@
 River Raid - Picocomputer 6502 port with native original game rules.
 Original game: Activision (1982), designer Carol Shaw.
 Reference disassembly and annotations: Thomas Jentzsch.
+The cover fades in at startup. Press any key to fade out and enter the game.
 The scrolling caption and attract demo start together after 3 seconds.
 
 Player 1: arrows, Space/Enter. Player 2: WASD, left Ctrl.
@@ -13,3 +14,10 @@ Two gamepads: D-pad or left stick, face buttons to fire,
 Start to pause, Select to restart.
 Fly over fuel tanks to refuel. Destroy the bridge to finish a section.
 Balloon: 60 points. Road tank: 250. Bridge: 500. Bridge with tank: 750.
+
+Credits:
+Carol Shaw
+Thomas Jentzsch
+Wojciech Gwiozdzik with AI Codex GPT-6.1 Sol High
+
+Have fun!

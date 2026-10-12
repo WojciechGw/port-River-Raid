@@ -61,7 +61,15 @@ W wariancie dla dwóch osób gracz zmienia się po utracie samolotu.
 
 W trybie pokazowym stopka przewija jasnoszary napis z tytułem gry,
 autorką, datami copyright, logo Activision i instrukcją rozpoczęcia gry.
-Po wyświetleniu planszy startowej program czeka 3 sekundy, a następnie
+Najpierw program pokazuje `assets/cover.bmp` z płynnym rozjaśnianiem
+(około sekundy). Dowolny klawisz rozpoczyna wygaszanie; po jego zakończeniu
+i zwolnieniu klawisza pojawia się plansza gry. Okładka zachowuje proporcje
+320×180 i jest wyśrodkowana na czarnym tle.
+Pod grafiką miga niewielki biały napis „PRESS ANY KEY”, widoczny przez pół
+sekundy i ukryty przez pół sekundy. Okładka i jej palety są nazwanymi zasobami
+w pliku `.rp6502`, wczytywanymi z `ROM:cover.bin` i `ROM:cover-fade.bin`;
+bitmapa napisu jest ładowana z `ROM:cover-prompt.bin`.
+Po wyświetleniu planszy gry program czeka 3 sekundy, a następnie
 jednocześnie uruchamia przewijanie napisu i pokaz z przewijaną rzeką.
 Tekst oraz glify można edytować w `src/demo-footer.json`.
 
@@ -86,10 +94,12 @@ Opis diagnostyki: [tests/README.md](tests/README.md).
 - `src/graphics.h`: paleta wzorowana na Atari 5200, czytelne bitmapy balonów,
   czołgów, gór, skarp i liter panelu.
 - `src/riverraid.asm`: szybki transfer linii i kolizje sprite'ów z terenem.
+- `src/cover.asm`: wyświetlanie okładki, fade i oczekiwanie na klawisz.
 - `src/riverraid.cfg`: mapa RAM z zarezerwowaną stroną zerową oryginału.
 - `src/xram.h`: mapa XRAM i sprawdzane podczas kompilacji struktury PIX.
 - `tools/port_original.py`: automatyczne tłumaczenie DASM na ca65 i wybór
   oryginalnych procedur. Tworzy `original_core.asm` w katalogu budowania.
+- `tools/make_cover.py`: konwersja `assets/cover.bmp` i przygotowanie palet fade.
 - `original/riverraid.asm`: niezmienione źródło odniesienia.
 
 <!-- rp6502
