@@ -16,13 +16,22 @@ else()
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
+    set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
+    set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
+    add_custom_command(OUTPUT ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_footer.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/demo-footer.json
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics.h
+            ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
+        DEPENDS src/demo-footer.json src/graphics.h tools/make_demo_footer.py
+        VERBATIM)
     add_custom_command(OUTPUT ${RIVER_CORE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/port_original.py
             ${CMAKE_CURRENT_SOURCE_DIR}/original/riverraid.asm ${RIVER_CORE}
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverride
-        src/riverraid.asm src/main.c ${RIVER_CORE})
+        src/riverraid.asm src/main.c ${RIVER_CORE} ${RIVER_FOOTER_HEADER})
     target_link_options(riverride PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverride APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
@@ -35,6 +44,7 @@ else()
     endif()
     rp6502_map(riverride src/xram.h "XRAM_.*")
     rp6502_asset(riverride help src/help.txt)
+    rp6502_asset(riverride XRAM(XRAM_DEMO_FOOTER_IMAGE) ${RIVER_FOOTER_IMAGE})
     rp6502_byproducts(riverride ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
     rp6502_asset(riverride RAM(0xC000) ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
     rp6502_executable(riverride DATA 0x0300 RESET 0x0300)

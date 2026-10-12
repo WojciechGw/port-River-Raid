@@ -38,25 +38,46 @@ typedef struct {
 #define XRAM_TERRAIN_CONFIG 0x0200
 #define XRAM_HUD_CONFIG 0x0220
 #define XRAM_SPRITES 0x0300
-#define XRAM_HUD_SPRITES 0x0380
+#define XRAM_HUD_SPRITES 0x0600
+#define XRAM_LOGO_PALETTE 0x0700
+#define XRAM_DEMO_FOOTER_PALETTE 0x0720
+#define XRAM_HUD_BLACK_PALETTE 0x05A0
 #define XRAM_TERRAIN 0x0800
 #define XRAM_TILES 0x2700
+#define XRAM_LOGO_IMAGE 0x3400
+#define XRAM_SMALL_MOUNTAIN 0x3600
+#define XRAM_MEDIUM_MOUNTAIN 0x5800
 #define XRAM_IMAGES 0x8000
 #define XRAM_SPRITE_PALETTES 0x0400
 #define XRAM_JET_PALETTE 0x0580
 #define XRAM_HUD_BITMAP_CONFIG 0x0240
+#define XRAM_DEMO_FOOTER_CONFIG 0x0260
+#define XRAM_DEMO_FOOTER_IMAGE 0x3800
 #define XRAM_HUD 0xA000
 #define XRAM_HUD_DIGITS 0x9B00
+#define XRAM_BALLOON_IMAGE 0x9D00
+#define XRAM_TANK_IMAGE 0x9D80
+#define XRAM_SCORE_DIGITS 0x9E00
+#define XRAM_GAME_DIGITS (XRAM_SCORE_DIGITS + 12 * 32)
+#define XRAM_BALLOON_PALETTE 0x05C0
+#define XRAM_TANK_PALETTE 0x05E0
 
 #define RIVER_WIDTH 160
 #define RIVER_HEIGHT 160
 #define RIVER_TOP 21
 #define HUD_TOP (RIVER_TOP + RIVER_HEIGHT + 1)
-#define HUD_HEIGHT 37
+#define HUD_PANEL_HEIGHT 37
+#define HUD_HEIGHT 48
 #define RIVER_RING 192
 #define TERRAIN_COLUMNS (RIVER_WIDTH / 4)
-#define TERRAIN_TILE_COUNT 13
-#define SPRITE_COUNT 10
+#define TERRAIN_TILE_COUNT 98
+#define TERRAIN_BANK_SOLID 7
+#define HUD_SPRITE_COUNT 19
+#define XRAM_RESERVE_IMAGE (XRAM_HUD_DIGITS + 12 * 32)
+#define SPRITE_COUNT 16
+#define OBJECT_IMAGE_COUNT 13
+#define BALLOON_ID 11
+#define TANK_ID 12
 #define IMAGE_BYTES 512
 #define HUD_BYTES (RIVER_WIDTH * HUD_HEIGHT)
 
@@ -68,8 +89,25 @@ _Static_assert(sizeof(oscillator_t) == 8, "PIX PSG layout");
 _Static_assert(XRAM_PSG % 256 + 64 <= 256, "PSG page boundary");
 _Static_assert(XRAM_TERRAIN + TERRAIN_COLUMNS * RIVER_RING <= XRAM_TILES, "Terrain overlaps tiles");
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_IMAGES, "Tiles overlap sprites");
+_Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_LOGO_IMAGE, "Tiles overlap logo");
+_Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_IMAGES, "Logo overlaps sprites");
+_Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_SMALL_MOUNTAIN, "Logo overlaps mountain");
+_Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Mountain overlaps sprites");
+_Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_DEMO_FOOTER_IMAGE, "Mountain overlaps demo footer");
+_Static_assert(XRAM_MEDIUM_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Medium mountain overlaps sprites");
 _Static_assert(XRAM_IMAGES + 11 * IMAGE_BYTES + 96 + 1024 <= XRAM_HUD, "Sprite image overlap");
 _Static_assert(XRAM_IMAGES + 11 * IMAGE_BYTES + 96 + 1024 <= XRAM_HUD_DIGITS, "Digit image overlap");
-_Static_assert(XRAM_HUD_DIGITS + 10 * 32 <= XRAM_HUD, "Digits overlap HUD");
+_Static_assert(XRAM_RESERVE_IMAGE + 32 <= XRAM_HUD, "Digits overlap HUD");
+_Static_assert(XRAM_RESERVE_IMAGE + 32 <= XRAM_BALLOON_IMAGE, "Reserve overlaps balloon");
+_Static_assert(XRAM_BALLOON_IMAGE + 128 <= XRAM_TANK_IMAGE, "Balloon overlaps tank");
+_Static_assert(XRAM_TANK_IMAGE + 128 <= XRAM_SCORE_DIGITS, "Tank overlaps score digits");
+_Static_assert(XRAM_GAME_DIGITS + 2 * 32 <= XRAM_HUD, "Game digits overlap HUD");
+_Static_assert(XRAM_SPRITES + SPRITE_COUNT * 10 <= XRAM_SPRITE_PALETTES, "Sprites overlap palettes");
+_Static_assert(XRAM_TANK_PALETTE + 32 <= XRAM_HUD_SPRITES, "Tank palette overlaps HUD sprites");
+_Static_assert(XRAM_HUD_SPRITES + HUD_SPRITE_COUNT * 10 <= XRAM_TERRAIN, "HUD sprites overlap terrain");
+_Static_assert(XRAM_HUD_SPRITES + HUD_SPRITE_COUNT * 10 <= XRAM_LOGO_PALETTE, "HUD sprites overlap logo palette");
+_Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_TERRAIN, "Logo palette overlaps terrain");
+_Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_DEMO_FOOTER_PALETTE, "Logo overlaps demo palette");
+_Static_assert(XRAM_DEMO_FOOTER_PALETTE + 14 <= XRAM_TERRAIN, "Demo palette overlaps terrain");
 _Static_assert(XRAM_HUD + HUD_BYTES <= 65536UL, "XRAM overflow");
 #endif

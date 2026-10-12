@@ -1,10 +1,12 @@
-"""Translate the supplied NTSC DASM listing to ca65 without rewriting rules.
+"""Translate the supplied NTSC DASM listing to ca65 with 5200 enemy extensions.
 
 The reference image retains its original $F000 byte layout, loaded as data
 at $C000-$CFFF. Native gameplay
 procedures use its original tables and reserved zero page $80-$FF. Only the
 TIA kernel, RIOT timer wait, hardware addresses, and destructive reset/stack
-initialization are replaced by the Picocomputer host. No Atari CPU emulator.
+initialization are replaced by the Picocomputer host. Balloons extend native
+generation/movement/scoring; bridge tanks use host companions and native
+decimal score/reserve rules. No Atari CPU emulator.
 Original: Activision / Carol Shaw, annotations Thomas Jentzsch.
 """
 import argparse
@@ -79,7 +81,11 @@ def generate(source):
     # These slices refer to the supplied, annotated disassembly. Fail closed
     # if its layout changes, rather than silently extract unrelated code.
     anchors = {296: 'START:', 1156: 'DEC    frameCnt', 1805: 'LDA    SWCHB',
-               2251: 'STA    PF1Lst,X', 3066: 'InitTab:', 3510: 'LooseJet SUBROUTINE'}
+               2251: 'STA    PF1Lst,X', 3066: 'InitTab:', 3510: 'LooseJet SUBROUTINE',
+               1244: 'CPY    #ID_BRIDGE', 1246: 'LDA    frameCnt',
+               1415: 'CMP    #ID_BRIDGE', 1574: 'LDA    ScoreTab,Y',
+               2132: 'LDY    EnemyIdTab,X', 2133: '.newFuel:',
+               2250: 'LDA    InitTab,X', 1409: '.checkCollisions:'}
     raw_lines = source.splitlines()
     for number, expected in anchors.items():
         if not raw_lines[number-1].strip().startswith(expected):
@@ -104,16 +110,47 @@ def generate(source):
     selected = [(n, code) for n,code in lines if any(a<=n<=b for a,b in ranges)]
     live_labels = {re.match(r"(\w+):", c)[1] for _,c in selected if re.match(r"(\w+):", c)}
     live_labels.add("MainLoop")
-    out += ['.include "longbranch.mac"']
+    out += ['.include "longbranch.mac"', '.import _start_level, _ready']
     # All virtual hardware occupies reserved $0200-$02FF, away from cc65 ZP.
     native_io = {name: (0x200 + value if value < 0x100 else value) for name,value in VCS.items()}
     native_io["INPT4"] = 0x25C  # INPT4-$30 = $022C; player 2 is $022D.
     out += [f"{name} = ${value:04X}" for name,value in native_io.items()]
     for name in sorted(definitions - live_labels):
         relocate = "-$3000" if name in rom_labels else ""
-        out.append(f"{name} = reference::{name}{relocate}")
-    out += ['; Native reset cannot clear cc65 ZP or change the caller stack.']
+        if name == "MAX_LEVEL":
+            out.append("MAX_LEVEL = 50 ; Allow F3 to select bridge 50; reference stays exact.")
+        else:
+            out.append(f"{name} = reference::{name}{relocate}")
+    out += ['; Native reset cannot clear cc65 ZP or change the caller stack.',
+            'ID_BALLOON = 11 ; Picocomputer / 5200 extension']
     for number, code in selected:
+        # Extend only the native copy; keep the 4096-byte reference unchanged.
+        if number == 1409:
+            # Attract mode uses native enemy movement and terrain generation,
+            # without fuel consumption, player movement, shots or deaths.
+            code += '\nLDA _ready\njne local_DisplayState_doSoundJmp'
+        if number == 1244:
+            out += ['CPY #ID_BALLOON', 'jeq port_balloon_move']
+        if number == 1246:
+            out.append('port_balloon_move:')
+        if number == 1415:
+            out += ['CMP #ID_BALLOON', 'jeq local_DisplayState_noBridge']
+        if number == 1574:
+            if code != 'LDA    ScoreTab,Y':
+                raise ValueError('Review native extended score table hook')
+            code = 'LDA port_ScoreTab,Y'
+        if number == 2133:
+            out += ['LDA level', 'CMP #2', 'jcc port_original_enemy',
+                    'LDA randomLo', 'AND #$18', 'jne port_original_enemy',
+                    'LDY #ID_BALLOON', 'port_original_enemy:']
+        if number == 2250:
+            # Partial GameInit (respawn/swap) ends at $BC, preserving each
+            # player's current level. Only full resets initialize $BD/$C2.
+            out += ['CPX #level-PF1Lst', 'jeq port_init_level',
+                    'CPX #player2State-PF1Lst', 'jne port_init_native',
+                    'port_init_level: LDA _start_level', 'JMP port_init_store',
+                    'port_init_native:']
+            code += '\nport_init_store:'
         if number == 297:  # C runtime already initialized the processor.
             code = "CLD"
         if number == 303:
@@ -136,8 +173,33 @@ def generate(source):
                       lambda m: {"BCC":"jcc", "BCS":"jcs", "BEQ":"jeq", "BNE":"jne",
                                  "BMI":"jmi", "BPL":"jpl", "BVC":"jvc", "BVS":"jvs"}[m[0]], code)
         out.append(code)
-    out += ['MainLoop: rts', '.endscope', '_rr_init = native::START',
-            '_rr_step = native::local_DisplayState_frame_step']
+    out += ['MainLoop: rts',
+            'port_ScoreTab: .byte 0,0,0,0,$88,$30,$30,$18,$A8,0,$40,$30',
+            # Award 250 in two decimal digits, preserving original reserve
+            # increments and the original score-overflow/death sequence.
+            'port_tank_bonus:', 'LDA #<MaxOut', 'CMP scorePtr1', 'jeq port_bonus_done',
+            'LDA #5*DIGIT_H', 'LDX #8', 'JSR port_bonus_digit',
+            'LDA #<MaxOut', 'CMP scorePtr1', 'jeq port_bonus_done',
+            'LDA #2*DIGIT_H', 'LDX #6', 'JMP port_bonus_digit',
+            'port_bonus_done: RTS',
+            'port_bonus_digit:', 'PHA', 'CPX #2', 'jne port_bonus_score',
+            'LDA livesPtr', 'CMP #<Nine', 'jeq port_bonus_score',
+            'jcc port_bonus_life', 'LDA #$FF',
+            'port_bonus_life: ADC #DIGIT_H', 'STA livesPtr',
+            'port_bonus_score: LDA scorePtr1,X', 'CMP #<Space', 'jne port_bonus_add',
+            'LDA #0', 'STA scorePtr1,X',
+            'port_bonus_add: PLA', 'CLC', 'ADC scorePtr1,X', 'CMP #<MaxOut',
+            'jcc port_bonus_store', 'SBC #<MaxOut', 'STA scorePtr1,X',
+            'LDA #DIGIT_H', 'DEX', 'DEX', 'jpl port_bonus_digit',
+            'LDA #<MaxOut', 'LDX #10', 'JSR SetScorePtr1',
+            'LDA #<Copyright0', 'STA livesPtr', 'JMP port_tank_crash',
+            'port_bonus_store: STA scorePtr1,X', 'RTS',
+            'port_tank_crash: LDA #1', 'LDY #$1F', 'JMP LooseJet',
+            '.endscope', '_rr_init = native::START',
+            '_rr_step = native::local_DisplayState_frame_step',
+            '.export _rr_tank_bonus, _rr_tank_crash',
+            '_rr_tank_bonus = native::port_tank_bonus',
+            '_rr_tank_crash = native::port_tank_crash']
     for label in ('shapePtr1aTab', 'shapePtr1bTab', 'ColorPtrTab', 'ColorTab',
                   'RoadColorTab', 'FuelTab0', 'FuelTab1', 'FuelTab2', 'FuelTab3',
                   'FuelTab4', 'ENABLTab', 'Copyright1', 'Copyright2',

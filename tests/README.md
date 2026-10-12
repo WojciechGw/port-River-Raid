@@ -9,16 +9,73 @@ Scenariusze uruchamiają rzeczywisty kod CPU przy 8 MHz, bez okna i dźwięku.
 Sprawdzają także komunikaty błędów emulatora, ponieważ niektóre wersje
 zwracają kod zero mimo błędu skryptu. Pliki skryptów i PNG trafiają do
 `build/cc65/release/checks`.
+Scenariusze `bridge-difficulty-*` sprawdzają cykl F3: 1 → 5 → 20 → 50 → 1,
+brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD, restart z pauzy,
+zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 50.
+`maximum-level-wrap` sprawdza powrót 50 → 49 przy nowym limicie.
+Scenariusze `demo-footer-*` sprawdzają ruch napisu o piksel na klatkę,
+zawijanie po całym przebiegu, jasnoszarą paletę także po aktywacji wygaszacza,
+podniesione i mniejsze TM, zatrzymanie przy pauzie oraz przejście między
+przewijanym napisem w pokazie i nieruchomym logo podczas gry.
+Scenariusze `demo-startup-*` i `demo-start-before-delay` sprawdzają
+trzysekundowe oczekiwanie, wspólny start napisu i ruchu rzeki, pauzę licznika
+oraz rozpoczęcie gry przed upływem oczekiwania.
 Scenariusz `fuel-lettering` odczytuje przesłaną do XRAM bitmapę zbiornika
 i sprawdza kształty liter F, U, E oraz L w jej przezroczystych pikselach.
 Wykrywa zamianę kolejności przeplatanych wierszy sprite'a.
+Scenariusze `5200-enemy-bitmaps`, `balloon-*` i `score-object-11` sprawdzają
+kolorową czaszę, nieprzezroczystą czerń czołgu, generowanie balonu, kolizje,
+odbicie od brzegu i 60 punktów. `tank-*` sprawdzają ruch, pauzę, restart,
+przesuwanie stanu wraz z blokiem terenu, punkty 250/750, dodatkowe życie,
+limit rezerw i przepełnienie wyniku. `enemies-5200.png` pokazuje oba dodatki.
+Scenariusz `hud-record-and-reserves` sprawdza zapis wyniku 500 w polu HI,
+zachowanie rekordu po restarcie oraz zgodność ikon samolotów rezerwowych
+z oryginalnym licznikiem gry.
+Scenariusz `mountains-stay-on-land` sprawdza wszystkie widoczne piksele
+gór przy zakrętach, wąskich i szerokich wyspach oraz odbiciu bitmapy.
+Zmiana przesunięcia pionowego nie może zmieniać poziomej pozycji gór;
+test obejmuje jednoczesne dopasowanie sześciu obiektów i zmianę wzorów terenu.
+Sprawdza wszystkie trzy warianty gór i wybiera do porównania bitmapę używaną
+przez sprite. Każdy widoczny piksel musi pozostawiać co najmniej dwa piksele
+logiczne odstępu od wody i brązowej skarpy, również po przekątnej. Scenariusz
+obejmuje szeroką skarpę w przygotowanym terenie; test przewijania sprawdza
+ten sam odstęp na planszy utworzonej przez grę.
 Scenariusz `bridge-bank-alignment` tworzy drogę oryginalnym generatorem
 i porównuje pozycję oraz szerokość sprite'a mostu z brzegami w buforze terenu.
 Dekoduje też tekstury kafelków i porównuje wszystkie widoczne piksele terenu
 z maskami kolizji; brązowe skarpy muszą pozostać po stronie lądu.
+Scenariusz `river-bank-contours` sprawdza brązowy kolor na każdym styku
+wody z lądem, również na poziomych stopniach zakrętów i przez pas drogi.
+Porównuje też szerokości skarp po obu stronach rzeki. Kafelki mieszające wodę
+ze skarpą muszą odpowiadać interpolowanym granicom `river_left`/`river_right`;
+na prostych szerokość zmienia się najwyżej o jeden piksel między wierszami.
+`river-banks.png` pokazuje ten kontur w emulatorze.
+Pomiar szerokości widocznego brązowego pasa prostopadle do rzeki porównuje
+odcinki pionowe, łagodnie nachylone i strome; grubość musi maleć w tej
+kolejności. Sprawdzany jest obraz intro i teren po 1200 klatkach przewijania.
+Nachylenie dużych odcinków określają maski rodzimego terenu, niezależnie od
+drobnych ząbków. Osobny pomiar sprawdza, czy na długim prostym fragmencie
+granica wody odchyla się o 0–3 piksele i kilkukrotnie zmienia kierunek,
+jak brzeg na referencji Atari XL. Wykrywa pas skarpy przy idealnie prostej wodzie.
+Próba mostu zmienia ręcznie kontekst generatora nad zachowanym terenem intro,
+więc sprawdza ciągłość i kolizje, a gładkość szerokości mierzymy w scenach
+wygenerowanych podczas normalnego działania gry.
 Testy `bridge-edge-63` i `bridge-edge-95` sprawdzają trafienia przy obu krawędziach.
+Scenariusze `smoothed-bank-*` sprawdzają rzeczywistą kolizję pocisku po obu
+stronach interpolowanej granicy zewnętrznego brzegu i wyspy, także gdy
+oryginalne bity PF wskazują jeszcze ląd. Po 1200 klatkach przewijania test
+ponownie porównuje teren z maskami, kontur skarp i piksele gór z wodą.
+`player-*-rim` sprawdzają przelot samolotu nad skarpą obu brzegów i obu
+krawędzi wyspy. `player-*-ground` przesuwają go o jeden piksel, aby skrzydło
+dotknęło podłoża, i sprawdzają utratę samolotu. `missile-*-rim` sprawdzają
+kolizję pocisku w tych samych miejscach. Granice kolizji gracza są także
+porównywane ze wszystkimi widocznymi pikselami terenu po starcie i po
+1200 klatkach przewijania: woda i brązowa skarpa muszą być bezpieczne.
+`jet-bitmap` porównuje wynik szybkiej konwersji 4bpp z oryginalną bitmapą CPU.
 Każdy scenariusz kończący się w grze sprawdza również zerowy licznik pominiętych
 VSYNC; pomiar obejmuje restart, odradzanie, tankowanie i zmianę gracza.
+`two-player-switch` sprawdza także nieprzezroczystą czarną paletę samolotu
+drugiego gracza po przełączeniu.
 Test `scroll-and-performance` wykonuje dodatkowo 1200 klatek z przyspieszaniem
 i ciągłym strzelaniem. `restart-and-palette-performance` łączy odtwarzanie
 terenu z przełączaniem palety po rozgrywce. Wymagany jest zoptymalizowany

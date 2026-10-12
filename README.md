@@ -8,9 +8,12 @@ Activision, 1982; projektantka Carol Shaw.
 Oryginalne procedury 6502 odpowiadają za trasę, przeciwników, przyspieszenie,
 paliwo, punktację, dodatkowe życia, odradzanie w zapamiętanej sekcji i grę
 dla dwóch osób. Grafika łączy oryginalne bitmapy z paletą i dekoracjami
-inspirowanymi screenshotami Atari XL: brązowe skarpy, góry i wyraźniejsze
-kolory obiektów. Panel pokazuje oryginalne cyfry i wskaźnik paliwa oraz
-gracza, wariant gry i numer mostu. Dźwięk przekłada rejestry TIA na PSG.
+inspirowanymi screenshotami Atari XL i 5200: wygładzone brązowe skarpy o zmiennej
+szerokości, dwa warianty gór (niebieskie zbocza lub czarne grzbiety)
+i ciemnoniebieska woda. Dodane balony
+mają wielobarwną czaszę i kosz, a czołgi przejeżdżają drogami przez mosty. Panel
+pokazuje wynik, paliwo, gracza, wariant gry, numer mostu, rekord sesji HI
+i samoloty rezerwowe. Dźwięk przekłada rejestry TIA na PSG.
 RGB555 oraz szum pozostają przybliżone. Zakres zgodności i ograniczenia
 opisuje [PORTING.md](PORTING.md).
 
@@ -43,16 +46,24 @@ obsługiwane przez kod portu. Gałąź BASIC pozostaje przykładem z szablonu.
 | Spacja lub Enter | Strzał; rozpoczęcie gry i powrót po końcu gry |
 | F1 | Kolor / obraz czarno-biały |
 | F2 | SELECT: wariant dla jednej lub dwóch osób |
-| F3, F4 | Trudność gracza 1 / 2: pociski kierowane lub lecące prosto |
+| F3 | Nowa gra od mostu BRIDGE: 1 → 5 → 20 → 50 → 1 |
+| F5, F4 | Gracz 1 / 2: pociski kierowane lub lecące prosto |
 | P | Pauza |
-| R | Nowa gra |
+| R | Nowa gra od mostu wybranego przez F3 |
 | Escape | Wyjście do konsoli |
 
 Obsługiwane są dwa gamepady: krzyżak lub lewy drążek steruje, cztery główne przyciski służą do
 strzelania, Start włącza pauzę, Select rozpoczyna nową grę. Zbiornik paliwa
 uzupełnia paliwo po najechaniu samolotem; zestrzelenie zbiornika daje punkty.
-Zniszczenie mostu daje 500 punktów; przewinięcie sekcji zwiększa poziom.
+Balon daje 60 punktów, czołg na drodze 250, most 500,
+a most z czołgiem 750. Przewinięcie sekcji zwiększa poziom.
 W wariancie dla dwóch osób gracz zmienia się po utracie samolotu.
+
+W trybie pokazowym stopka przewija jasnoszary napis z tytułem gry,
+autorką, datami copyright, logo Activision i instrukcją rozpoczęcia gry.
+Po wyświetleniu planszy startowej program czeka 3 sekundy, a następnie
+jednocześnie uruchamia przewijanie napisu i pokaz z przewijaną rzeką.
+Tekst oraz glify można edytować w `src/demo-footer.json`.
 
 ## Testy w emulatorze
 
@@ -72,7 +83,8 @@ Opis diagnostyki: [tests/README.md](tests/README.md).
 ## Kod
 
 - `src/main.c`: konfiguracja RIA/VGA/PSG, raster, wejście i kolizje.
-- `src/graphics.h`: paleta wzorowana na Atari XL, góry i litery panelu.
+- `src/graphics.h`: paleta wzorowana na Atari 5200, czytelne bitmapy balonów,
+  czołgów, gór, skarp i liter panelu.
 - `src/riverraid.asm`: szybki transfer linii i kolizje sprite'ów z terenem.
 - `src/riverraid.cfg`: mapa RAM z zarezerwowaną stroną zerową oryginału.
 - `src/xram.h`: mapa XRAM i sprawdzane podczas kompilacji struktury PIX.
