@@ -1,5 +1,14 @@
 # River Raid for Picocomputer 6502
 
+<!-- rp6502
+preset: cc65/Release
+publish: riverraid.zip
+-->
+[![Play River Raid](https://wojciechgw.github.io/port-river-raid/port-river-raid/screenshot.png)](https://wojciechgw.github.io/port-river-raid/port-river-raid/)
+
+[Play it in your browser](https://wojciechgw.github.io/port-river-raid/port-river-raid/).
+
+
 A River Raid port for Picocomputer 6502 that runs the original game logic natively.
 The reference source is `original/riverraid.asm`: Thomas Jentzsch's annotated
 disassembly of the **Atari 2600** version. Original game and graphics:
@@ -101,8 +110,3 @@ Diagnostics are described in [tests/README.md](tests/README.md).
   of the original routines. Generates `original_core.asm` in the build directory.
 - `tools/make_cover.py`: converts `assets/cover.bmp` and prepares fade palettes.
 - `original/riverraid.asm`: unchanged reference source.
-
-<!-- rp6502
-preset: cc65/Release
-publish: riverraid.zip
--->
