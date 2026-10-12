@@ -1,266 +1,283 @@
-# Stan portu
+# Port status
 
-Port wykonuje natywnie oryginalne procedury gry z `original/riverraid.asm`.
-Źródło odniesienia to wersja **Atari 2600 NTSC**, z układami TIA i RIOT.
-Autorka gry: Carol Shaw, Activision (1982); autor komentarzy disassembly:
-Thomas Jentzsch. Źródło oryginału pozostaje niezmienione.
+The port runs the original game routines from `original/riverraid.asm` natively.
+The reference source is the **Atari 2600 NTSC** version, using the TIA and RIOT
+chips. Game designer: Carol Shaw, Activision (1982); disassembly annotations:
+Thomas Jentzsch. The original source remains unchanged.
 
-## Logika oryginału
+## Original game logic
 
-`tools/port_original.py` tłumaczy DASM na ca65, zachowuje kompletny obraz
-4 KB jako dane odniesienia i wyprowadza osobne, wykonywalne procedury:
+`tools/port_original.py` translates DASM to ca65, preserves the complete
+4 KB image as reference data, and extracts separate executable routines:
 
-- generator `PFPat`, zmiany brzegów i wysp, rozmieszczenie domów, paliwa,
-  statków, helikopterów, samolotów oraz mostów;
-- oryginalny LFSR, zapamiętywanie nasiona sekcji i odtwarzanie trasy po śmierci;
-- ułamkowe przewijanie, przyspieszenie poziome i pionowe, rytm ruchu oraz animacji;
-- spalanie 32 jednostek paliwa na klatkę i oryginalne tankowanie;
-- punktacja 100/60/30/500/80, dodatkowe życie co 10 000 punktów, limit
-  dziewięciu żyć oraz zachowanie przy przekroczeniu 999 990 punktów;
-- przejście sekcji, eksplozja, odradzanie,
-  tryby dla jednej i dwóch osób oraz przełączniki trudności;
-- procedury dźwięku, tryb czarno-biały i wygaszacz kolorów.
+- the `PFPat` generator, bank and island changes, and placement of houses,
+  fuel tanks, ships, helicopters, planes, and bridges;
+- the original LFSR, saving the section seed, and restoring the course after death;
+- fractional scrolling, horizontal and vertical acceleration, and movement
+  and animation timing;
+- consumption of 32 fuel units per frame and the original refueling behavior;
+- scoring of 100/60/30/500/80 points, an extra life every 10,000 points, a limit
+  of nine lives, and behavior when the score exceeds 999,990;
+- section transitions, explosions, respawning, one-player and two-player modes,
+  and difficulty switches;
+- sound routines, black-and-white mode, and the color screensaver.
 
-Most rozpoczyna przejście sekcji. Numer poziomu zmienia się w generatorze
-podczas przewijania, zgodnie z oryginałem. Początkowo przeciwnicy stoją;
-statki i helikoptery zaczynają się poruszać od drugiego poziomu, samoloty
-pojawiają się od trzeciego. Śmierć odtwarza zapamiętaną sekcję; port nie
-dodaje nietykalności ani sztucznego, bezpiecznego korytarza.
+A bridge starts the transition to the next section. The generator changes
+the level number during scrolling, as in the original. Enemies are initially
+stationary; ships and helicopters begin moving at level two, and planes
+appear from level three. Death restores the saved section; the port adds
+neither invulnerability nor an artificial safe corridor.
 
-F3 wybiera most startowy w cyklu 1 → 5 → 20 → 50 → 1 i rozpoczyna nową grę.
-Wybór obejmuje obu graczy i pozostaje aktywny przy restarcie klawiszem R.
-Pełna inicjalizacja stosuje wybrany poziom, a odradzanie i zmiana gracza
-zachowują ich aktualną sekcję. W wykonywanej kopii procedur limit poziomów
-zwiększono z 48 do 50; po sekcji 50 generator wraca do 49. Obraz oryginalnego
-ROM pozostaje niezmieniony. Kierowanie pociskami przełączają teraz F5/F4.
+F3 selects the starting bridge in the cycle 1 → 5 → 20 → 50 → 1 and starts
+a new game. The selection applies to both players and remains active when
+restarting with R. Full initialization applies the selected level, while
+respawning and player switching preserve each player's current section.
+In the executable copy of the routines, the level limit was increased from
+48 to 50; after section 50, the generator returns to 49. The original ROM
+image remains unchanged. Missile guidance is now toggled with F5/F4.
 
-Balony (ID 11) rozszerzają wykonywaną kopię procedur: od drugiego poziomu
-zastępują część losowanych przeciwników, poruszają się i odbijają od brzegów
-tak jak helikoptery. Trafienie daje 60 punktów, kontakt z samolotem eksplozję.
-Czołg jest dodatkowym obiektem każdego bloku mostu, od pierwszego mostu;
-przejeżdża po drodze i zawraca na jej krańcach. Jego stan przesuwa się razem
-z blokiem terenu, pauza zatrzymuje ruch, a restart/odradzanie odtwarza stan.
-Czołg na lądowej części drogi daje 250 punktów; trafienie mostu z czołgiem
-na jego przęśle niszczy oba obiekty i daje łącznie 750 zamiast 500.
-Dodatkowe 250 korzysta z oryginalnych dziesiętnych wskaźników cyfr,
-przyznawania rezerw co 10 000 punktów, limitu 9 i przepełnienia wyniku.
-Czołgi w tym wariancie nie strzelają ani nie patrolują brzegów od mostu 7.
-Punktację balonu i mostu z czołgiem opisuje
-[instrukcja Activision dla 5200](https://atariage.com/manual_html_page.php?SoftwareID=2101).
+Balloons (ID 11) extend the executable copy of the routines: from level two,
+they replace some randomly generated enemies, moving and bouncing off the
+banks like helicopters. Shooting a balloon awards 60 points; contact with
+the plane causes an explosion.
+A tank is an additional object in every bridge block, starting with the
+first bridge. It drives along the road and turns around at its ends. Its
+state moves with the terrain block, pause stops its movement, and restarting
+or respawning restores its state. A tank on the land portion of the road
+awards 250 points; hitting a bridge with a tank on its span destroys both
+objects and awards 750 points in total instead of 500.
+The additional 250 points use the original decimal digit pointers, reserve
+awards every 10,000 points, the limit of nine lives, and score overflow behavior.
+In this version, tanks do not fire or patrol the banks from bridge seven onward.
+Balloon and bridge-with-tank scores are described in the
+[Activision manual for the 5200](https://atariage.com/manual_html_page.php?SoftwareID=2101).
 
-Pozostałe zmiany procedur dotyczą adresów sprzętu, zachowania stosu cc65, inicjalizacji
-zarezerwowanej strony zerowej oraz pominięcia oczekiwania na zegar RIOT.
-Rozszerzone skoki ca65 zachowują warunki i flagi procesora. Generator sprawdza
-rozmiar obrazu i położenie ważnych fragmentów źródła; zmiana układu disassembly
-wymaga przeglądu zakresów wybieranych do portu.
+The remaining routine changes concern hardware addresses, preserving the cc65
+stack, initializing the reserved zero page, and skipping the RIOT timer wait.
+The ca65 long branches preserve their conditions and processor flags. The
+generator checks the image size and the locations of important source sections;
+changes to the disassembly layout require reviewing the ranges selected for
+the port.
 
-## Warstwa Picocomputera
+## Picocomputer layer
 
-RAM `$0000–$007F` służy cc65, `$0080–$00FF` zachowuje zmienne gry,
-`$0200–$02FF` zawiera odczyty wejścia i wyjściowe rejestry dźwięku.
-Program rozpoczyna się pod `$0300`. Oryginalny obraz ROM znajduje się jako
-dane pod `$C000–$CFFF`; zachowuje bajty zmontowane dla Atari pod `$F000`.
-Wykonywane procedury mają przeniesione odwołania i osobną tabelę inicjalizacji.
-Kod Atari odpowiedzialny za raster nie jest wykonywany. Nie ma emulacji CPU Atari.
+RAM `$0000–$007F` is used by cc65, `$0080–$00FF` retains the game variables,
+and `$0200–$02FF` contains input readings and sound output registers.
+The program starts at `$0300`. The original ROM image is stored as data at
+`$C000–$CFFF`, preserving the bytes assembled for the Atari at `$F000`.
+The executable routines have relocated references and a separate initialization
+table. The Atari raster code is not executed. There is no Atari CPU emulation.
 
-VGA: canvas 320×240, pole gry na liniach 21–180, współrzędne logiczne 160×160.
-Rzeka korzysta z oryginalnej kolejności bitów PF0/PF1/PF2, odbicia oraz
-tablic drogi. Bufor kołowy 40×192 przechowuje indeksy kafelków
-8×1 pikseli: jeden kafelek odpowiada bitowi playfield Atari. Dopisuje jedynie
-nowe linie, przesyłając 40 zamiast 160 bajtów na wiersz.
-Kafelki na styku lądu i wody dodają brązową skarpę od strony lądu,
-także na wyspach i przez wszystkie odcienie drogi przy moście. Na odcinkach
-pionowych skarpa ma szerokość 3–5 pikseli logicznych. Nachylenie mierzone
-z par próbek oddalonych o 2 i 4 wiersze zwęża ją stopniowo do 1 piksela na
-stromych skosach; uwzględnia dwukrotne rozciągnięcie X na canvasie. Tabela
-`bank_slope_width` w `src/graphics.h` opisuje tę zależność bez obliczeń
-zmiennoprzecinkowych. Jednoliniowe połączenia zamykają kontur na stopniach.
-Przy dołączeniu nowego bloku odświeżane są cztery poprzednie wiersze, których
-nachylenie zależy od nowego sąsiada. Próbki wspólne dla par wierszy są
-zapamiętywane w obrębie jednego przerysowania; pamięć podręczna jest
-zerowana po zmianie danych przez logikę gry. Szerokość może
-przekroczyć jeden kafelek. Generator 2600 nadal określa przebieg rzeki, ale
-stopnie PF są interpolowane wewnątrz lądu do pojedynczych pikseli logicznych.
-Sam kontur wody również ma drobne załamania: `bank_wave` odtwarza próbki
-długiego brzegu z `original/Atari XL/image0.png` (wiersze logiczne 41–104).
-Przesuwa granicę w głąb lądu o 0–3 piksele; profil jest związany z wierszem
-terenu, więc przesuwa się razem z rzeką. Szybki reset korzysta z tej samej
-granicy i gotowych kafelków dla każdej fazy, a góry zachowują dodatkowy
-margines trzech pikseli od wody. Duże zakręty nadal wyznaczają dane generatora.
-`river_left` i `river_right` przechowują dokładne granice dla rysowania oraz
-kolizji; droga zachowuje oryginalną szerokość prześwitu mostu. Kafelki mieszają
-kolory wody, skarpy i podłoża, a cały bufor nadal wymaga 40 bajtów na wiersz.
-Samolot gracza może przelatywać nad brązową skarpą. Dla każdego wiersza
-renderer zapamiętuje granice podłoża poza skarpą, osobno dla obu brzegów
-i wyspy. `mask_player_land` sprawdza tylko te przedziały i oryginalne maski
-terenu; kolizja pojawia się dopiero po wejściu nieprzezroczystego piksela
-samolotu na ląd. Reset i przewijanie aktualizują te same granice.
-Sprite'y odtwarzają strumienie A/B, kolory wierszy, rozmiary TIA, odbicia,
-kopie eksplozji mostu i zawijanie samolotów na krawędzi. Samolot gracza
-zajmuje przednią warstwę VGA (plane 2), nad obiektami gry na plane 1.
-Panel wyświetla
-bitmapy cyfr, paliwa i napisu Activision zamiast fontu VGA. Wynik oraz HI
-korzystają z pogrubionych cyfr 6×6, odtworzonych z referencji Atari XL/5200.
-P1/P2 i HI mają wąski krój 3×5, GAME szersze litery w komórkach 8×6,
-a BRIDGE zachowuje osobną sześciowierszową bitmapę z odstępami oryginału.
-Cyfra wariantu pod GAME oraz numer mostu używają tego samego kroju co wynik.
-Pozycje pól odpowiadają załączonemu układowi: GAME po lewej, wskaźnik paliwa
-obok, BRIDGE nad ikonami rezerw. Ramka paliwa z E, F oraz 1/2 jest czytelną
-bitmapą 39×16 w `src/graphics.h`; żółty wskaźnik zależy od bieżącego paliwa.
-W miejscu domu i drzewa z 2600 pojawiają się trzy warianty gór. Dwa odtworzono
-z `original/Atari XL/image0.png`: wysoki masyw z niebieskimi stokami oraz
-niższe brązowe szczyty z czarnymi grzbietami. Trzeci to pojedyncza góra
-średniej wielkości z czarnym grzbietem. Wariant zależy od danych
-obiektu i pozostaje ten sam po przesunięciu między blokami terenu.
-Pozycja gór uwzględnia wspólny pas lądu na całej
-wysokości bitmapy i sąsiednich wierszy interpolacji, również poza widocznym
-obszarem. Margines uwzględnia trzy piksele wygładzania wody, do pięciu
-pikseli skarpy i dwa piksele logiczne wolnego lądu. Zbyt wąskie wyspy
-powodują przesunięcie gór na najbliższy dostatecznie szeroki pas lądu.
-Pozycja jest zapamiętywana
-do zmiany bloku terenu; rysowanie i kolizje korzystają z tego samego
-przesunięcia i dokładnej nowej sylwetki.
-Panel odtwarza układ 5200: P1/P2 i wynik po lewej, HI z rekordem po prawej,
-GAME, paliwo i BRIDGE niżej, samoloty rezerwowe pod numerem mostu.
-Rekord sesji jest wspólny dla obu graczy i pozostaje po R/restarcie gry;
-liczba ikon rezerwowych odpowiada oryginalnemu licznikowi i może dojść do 9.
-Cyfry liczników i ikony są przygotowane przy starcie; sprite'y aktualizują
-tylko obraz/liczbę, bez ponownego rysowania bitmap w klatce gry.
-Strumień A przypada na parzyste linie bloku, B na nieparzyste; ta kolejność
-zachowuje czytelne litery FUEL wycięte w bitmapie zbiornika.
-Most ma szerokość 32 pikseli logicznych i zajmuje zakres X 64–95, zgodny
-z przewężeniem rzeki. Pozycję szerokiego sprite'a skorygowano o jeden piksel
-względem wartości 63 przekazywanej przez oryginał do `CalcPosX`; ten sam
-początek wykorzystują rysowanie i kolizje.
-Panel zajmuje linie 182–218, z pojedynczą czarną linią oddzielającą go od gry.
-Wynik rozpoczyna się w wierszu 5 panelu, GAME/BRIDGE w 18,
-skala paliwa w 17, a rezerwy w 25. Współrzędne pól określa blok `HUD_*`
-na początku `src/main.c`; zmiana kroju nie wymaga zmiany logiki gry.
-Czarna stopka 219–229 mieści logo Activision skopiowane piksel po pikselu
-z `original/Atari 5200/river_raid_5.gif` (obszar X 48–167, Y 211–217).
-Bitmapa 120×7 zachowuje kształt napisu, pięć kolorów tęczy i ukośne
-połączenie z literą A. Zaczyna się w X 48 canvasu, trzy wiersze pod górą
-stopki. Osobny sprite i paleta zachowują kolory GIF-u po zaokrągleniu
-do RGB555; przełącznik B&W i wygaszacz stosują oryginalne role kolorów.
+VGA uses a 320×240 canvas, with the playfield on scanlines 21–180 and logical
+coordinates of 160×160. The river uses the original PF0/PF1/PF2 bit order,
+mirroring, and road tables. A 40×192 ring buffer stores indices of 8×1-pixel
+tiles: one tile corresponds to one Atari playfield bit. Only new scanlines
+are written, transferring 40 rather than 160 bytes per row.
+Tiles at the land/water boundary add a brown rim on the land side, including
+islands and all road shades at the bridge. On vertical sections, the rim is
+3–5 logical pixels wide. The slope, measured from pairs of samples spaced
+two and four rows apart, gradually narrows it to one pixel on steep diagonals;
+it accounts for the doubled X scale on the canvas. The `bank_slope_width`
+table in `src/graphics.h` defines this relationship without floating-point
+calculations. Single-scanline joins close the contour at steps.
+When a new block is added, the four preceding rows are refreshed because
+their slopes depend on the new neighbor. Samples shared by pairs of rows
+are cached within a redraw batch; the cache is cleared after the game logic
+changes the data. The width can exceed one tile. The 2600 generator still
+defines the river's course, but PF steps are interpolated within the land
+to individual logical pixels.
+The water contour also has small bends: `bank_wave` reproduces samples of
+the long bank in `original/Atari XL/image0.png` (logical rows 41–104).
+It shifts the boundary 0–3 pixels into the land; the profile is tied to the
+terrain row, so it scrolls with the river. The fast reset uses the same
+boundary and prepared tiles for each phase, while mountains retain an
+additional three-pixel margin from the water. Large bends are still defined
+by the generator data.
+`river_left` and `river_right` store the exact boundaries for rendering and
+collisions; the road retains the original width of the bridge opening.
+Tiles mix water, rim, and ground colors, while the entire buffer still
+requires 40 bytes per row.
+The player's plane can fly over the brown rim. For each row, the renderer
+stores the ground boundaries beyond the rim, separately for both banks and
+the island. `mask_player_land` checks only these intervals and the original
+terrain masks; a collision occurs only when an opaque pixel of the plane
+reaches the ground. Resetting and scrolling update the same boundaries.
+Sprites reproduce the A/B streams, row colors, TIA sizes, mirroring, bridge
+explosion copies, and plane wrapping at the edges. The player's plane occupies
+the front VGA layer (plane 2), above game objects on plane 1.
+The panel displays digit, fuel, and Activision lettering bitmaps rather than
+the VGA font. The score and HI use bold 6×6 digits reconstructed from Atari
+XL/5200 references. P1/P2 and HI use a narrow 3×5 typeface, GAME uses wider
+letters in 8×6 cells, and BRIDGE retains a separate six-row bitmap with the
+original spacing. The variation number below GAME and the bridge number use
+the same typeface as the score.
+Field positions follow the supplied layout: GAME on the left, the fuel gauge
+beside it, and BRIDGE above the reserve icons. The fuel gauge frame with E,
+F, and 1/2 is a readable 39×16 bitmap in `src/graphics.h`; the yellow indicator
+depends on the current fuel level.
+Three mountain variants replace the house and tree from the 2600 version.
+Two were reconstructed from `original/Atari XL/image0.png`: a tall mountain
+range with blue slopes and lower brown peaks with black ridges. The third is
+a single medium-sized mountain with a black ridge. The variant depends on
+the object data and remains the same when it moves between terrain blocks.
+Mountain placement considers the shared strip of land across the full bitmap
+height and neighboring interpolation rows, including those outside the
+visible area. The margin accounts for three pixels of water smoothing, up
+to five pixels of rim, and two logical pixels of clear land. Islands that
+are too narrow cause the mountains to shift to the nearest sufficiently
+wide strip of land. The position is cached until the terrain block changes;
+rendering and collisions use the same offset and the exact new silhouette.
+The panel reproduces the 5200 layout: P1/P2 and the score on the left, HI and
+the high score on the right, GAME, fuel, and BRIDGE below, and reserve planes
+under the bridge number. The session high score is shared by both players
+and survives R/game restarts; the number of reserve icons matches the original
+game counter and can reach nine.
+Counter digits and icons are prepared at startup; sprites update only the
+image or number, without redrawing bitmaps during a game frame.
+Stream A occupies even rows of a block and B occupies odd rows; this order
+preserves the readable FUEL letters cut out of the fuel tank bitmap.
+The bridge is 32 logical pixels wide and occupies X 64–95, matching the
+river's narrow opening. The wide sprite's position was corrected by one
+pixel relative to the value 63 passed to `CalcPosX` by the original game;
+rendering and collisions use the same origin.
+The panel occupies scanlines 182–218, separated from the game by a single
+black scanline. The score starts on panel row 5, GAME/BRIDGE on row 18,
+the fuel scale on row 17, and reserves on row 25. The `HUD_*` definitions
+at the start of `src/main.c` specify the field coordinates; changing the
+typeface does not require changes to the game logic.
+The black footer on scanlines 219–229 contains the Activision logo, copied
+pixel by pixel from `original/Atari 5200/river_raid_5.gif` (X 48–167, Y 211–217).
+The 120×7 bitmap preserves the lettering, five rainbow colors, and the diagonal
+connection to the letter A. It starts at canvas X 48, three rows below the
+top of the footer. A separate sprite and palette preserve the GIF's colors
+rounded to RGB555; the B&W switch and screensaver use the original color roles.
 
-Przed inicjalizacją gry `src/cover.asm` wyświetla okładkę `assets/cover.bmp`.
-Bitmapa 320×180 zachowuje indeksy i wszystkie kolory palety, zaokrąglone
-do RGB555. Zajmuje $1000–$F0FF XRAM; konfiguracja jest w $0280, paleta
-w $0400, a bufor kolejnej palety w $0600. Obraz jest wyśrodkowany w Y=30
-na canvasie 320×240. `tools/make_cover.py` przygotowuje 64 poziomy jasności
-w obie strony.
-Okładka, palety i bitmapa napisu są pakowane jako nazwane zasoby `.rp6502`:
-`cover.bin`, `cover-fade.bin` i `cover-prompt.bin`. Program otwiera je na dysku
-`ROM:` i czyta przez READ_XRAM; loader nie ładuje grafiki okładki automatycznie.
-Palety są czytane do bufora, a po VSYNC kopiowane
-do palety wyświetlanej, przed pierwszą linią okładki. Rozjaśnianie i wygaszanie
-trwają po około sekundzie. Pod grafiką, w X=120, Y=222, jest wyśrodkowana
-bitmapa „PRESS ANY KEY”: litery 5×7 w polu 80×8, białe na czarnym tle.
-Osobna paleta w $0850 i bitmapa w $0800 pozostawiają kolory okładki bez zmian.
-Konfiguracja w $02A0 przesuwa napis poza ekran co 30 VSYNC, co daje pół sekundy
-widoczności i pół sekundy przerwy. Napis pojawia się po rozjaśnieniu i znika
-po naciśnięciu klawisza, przed wygaszaniem.
-Po rozjaśnieniu program czeka na dowolny klawisz HID,
-również funkcyjny lub modyfikator; bity stanu LED nie zamykają okładki.
-Klawisz zamykający ekran jest konsumowany wraz ze zwolnieniem, aby nie
-uruchamiał dodatkowo sterowania grą. Kod i jego kilka bajtów roboczych leżą
-w wolnej pamięci CPU od $D000, za oryginalnym ROM-em; nie zajmują stosu ani
-buforów gry. Po wygaszeniu program przywraca pasek stopki z zasobu ROM,
-a inicjalizacja gry odtwarza pozostałe zasoby w ponownie wykorzystywanym XRAM.
+Before initializing the game, `src/cover.asm` displays the cover image from
+`assets/cover.bmp`. The 320×180 bitmap preserves its indices and all palette
+colors, rounded to RGB555. It occupies XRAM $1000–$F0FF; its configuration
+is at $0280, palette at $0400, and next-palette buffer at $0600. The image
+is centered at Y=30 on the 320×240 canvas. `tools/make_cover.py` prepares
+64 brightness levels in both directions.
+The cover, palettes, and message bitmap are packaged as named `.rp6502`
+assets: `cover.bin`, `cover-fade.bin`, and `cover-prompt.bin`. The program
+opens them on the `ROM:` drive and reads them using READ_XRAM; the loader
+does not load the cover graphics automatically.
+Palettes are read into the buffer and copied to the displayed palette after
+VSYNC, before the first scanline of the cover. Fade in and fade out each
+take about one second. Below the image, at X=120, Y=222, is a centered
+"PRESS ANY KEY" bitmap: 5×7 letters in an 80×8 area, white on black.
+A separate palette at $0850 and bitmap at $0800 leave the cover colors
+unchanged. The configuration at $02A0 moves the message off-screen every
+30 VSYNCs, giving half a second of visibility and half a second of darkness.
+The message appears after fade in and disappears when a key is pressed,
+before fade out.
+After fade in, the program waits for any HID key, including function keys
+and modifiers; LED status bits do not dismiss the cover. The dismissal key
+is consumed through its release so it cannot also trigger game controls.
+The code and its few working bytes occupy free CPU memory from $D000,
+after the original ROM, without taking space reserved for the stack or game
+buffers. After fade out, the program restores the footer strip from a ROM
+asset, and game initialization restores the remaining assets in the reused XRAM.
 
-W trybie pokazowym stopkę zastępuje napis przewijany w lewo o jeden piksel
-canvasu na klatkę. Tekst i czytelne glify są w `src/demo-footer.json`.
-Po wyświetleniu pierwszej planszy licznik 180 VSYNC (3 sekundy) wstrzymuje
-napis i pokaz. Oba ruszają w tej samej klatce. Pokaz wykonuje oryginalny
-generator terenu i ruch przeciwników; pomija sterowanie samolotem, strzały,
-zużycie paliwa i kolizje gracza. Pauza zatrzymuje również licznik oczekiwania.
-Krój odtwarza grube litery 6×6 z próbek Atari XL/5200, w komórkach szerokości
-8 pikseli logicznych; szersze „w” zajmuje 7 kolumn, a dodatkowy wiersz mieści
-dolne części małych liter.
-TM ma podniesione glify 3×5 i 5×5, bez odstępu przed znakiem. W miejscu `{Activision}`
-wstawiana jest ta sama bitmapa logo z `src/graphics.h`. Generator
-`tools/make_demo_footer.py` przygotowuje cały pasek przy budowaniu ROM-u;
-program ładuje go do XRAM $3800 po zamknięciu okładki. VGA przewija bitmapę z zawijaniem poziomym,
-bez rysowania liter przez CPU w każdej klatce. Osobna paleta zachowuje
-jasnoszary kolor tekstu także przy wygaszaczu. Pauza zatrzymuje napis;
-rozpoczęcie gry przywraca nieruchome logo, a koniec gry przywraca przewijanie.
+In attract mode, the footer is replaced by a caption scrolling left by one
+canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
+After the first game screen is displayed, a 180-VSYNC counter (3 seconds)
+holds the caption and demo. Both start in the same frame. The demo runs the
+original terrain generator and enemy movement; it skips plane controls,
+firing, fuel consumption, and player collisions. Pause also stops the
+startup countdown.
+The typeface reproduces the bold 6×6 letters from Atari XL/5200 samples,
+in cells eight logical pixels wide; the wider "w" occupies seven columns,
+and an additional row accommodates lowercase descenders.
+TM uses raised 3×5 and 5×5 glyphs, without a preceding space. The same logo
+bitmap from `src/graphics.h` is inserted at `{Activision}`. The generator
+`tools/make_demo_footer.py` prepares the entire strip when building the ROM;
+the program loads it into XRAM $3800 after dismissing the cover. VGA scrolls
+the bitmap with horizontal wrapping, without the CPU drawing letters each
+frame. A separate palette preserves the light gray text even during the
+screensaver. Pause stops the caption; starting a game restores the static
+logo, and game over restores scrolling.
 
-Program oblicza kolizje pikseli przed wywołaniem oryginalnej logiki,
-wypełniając jej flagi kolizji. Transfer linii i sprawdzanie sprite'ów z terenem
-wykonuje asembler. Wejście obsługuje USB HID i dwa gamepady. Zegar gry
-pochodzi z `RIA.vsync` przy 60 Hz. Licznik pominiętych klatek obejmuje
-wszystkie operacje po początkowej konfiguracji obrazu, również restart,
-odradzanie i zmianę gracza.
+The program computes pixel collisions before calling the original game
+logic, setting its collision flags. Assembly routines handle scanline
+transfers and sprite/terrain checks. Input supports USB HID and two gamepads.
+The game clock comes from `RIA.vsync` at 60 Hz. The skipped-frame counter
+covers all operations after the initial video configuration, including
+restarting, respawning, and player switching.
 
-Pozycja przewijania, lista obiektów i przesunięcie napisu są przygotowywane
-w RAM podczas poprzedniej klatki. Zaraz po VSYNC procedura asemblerowa
-`present_frame` publikuje je razem w XRAM w około 0,3 ms przy 8 MHz,
-przed dotarciem obrazu do pierwszej linii rzeki. Obliczenia terenu i kolizji
-nie opóźniają tej publikacji. Sam brak pominiętych VSYNC nie wyklucza
-rozrywania obrazu, gdy pozycję tła zmienia się w trakcie wyświetlania klatki.
+The scroll position, object list, and caption offset are prepared in RAM
+during the preceding frame. Immediately after VSYNC, the `present_frame`
+assembly routine publishes them together to XRAM in about 0.3 ms at 8 MHz,
+before scanout reaches the first river scanline. Terrain and collision
+calculations do not delay this publication. The absence of skipped VSYNCs
+alone does not rule out tearing if the background position changes while
+a frame is being displayed.
 
-Restart odtwarza początkowy, prosty korytarz szybką procedurą asemblerową.
-W pomiarze Release przy 8 MHz koszt odtwarzania terenu spadł z około 391 ms
-do 5–6 ms. Panel przesyła tylko kolumny zajęte przez cyfry, paliwo i logo;
-rysowanie glifów wykonuje asembler, a częstotliwości PSG korzystają z tabel
-przygotowanych przy starcie zamiast dzielenia w każdej klatce.
-Zmiana gracza aktualizuje tylko paletę samolotu; pełna aktualizacja palet
-pozostaje potrzebna przy zmianie trybu barw lub wygaszacza. Renderer brzegu
-korzysta ze stałych buforów roboczych, ograniczając koszt dostępu do stosu cc65
-podczas odradzania.
-Przeliczanie koloru TIA i rozwijanie bitmapy samolotu do 4bpp wykonuje
-asembler. Ogranicza to koszt klatki łączącej restart, odrysowanie panelu
-i zmianę palety, bez zmiany pikseli samolotu ani barw.
+Restarting restores the initial straight corridor with a fast assembly
+routine. In Release measurements at 8 MHz, terrain restoration time fell
+from about 391 ms to 5–6 ms. The panel transfers only the columns occupied
+by digits, fuel, and the logo; glyph rendering is handled in assembly, and
+PSG frequencies use tables prepared at startup instead of division in each
+frame. Player switching updates only the plane palette; a full palette
+update is still needed when changing the color mode or screensaver state.
+The bank renderer uses fixed working buffers, reducing cc65 stack access
+cost during respawning.
+TIA color conversion and expansion of the plane bitmap to 4bpp are handled
+in assembly. This reduces the cost of a frame combining a restart, panel
+redraw, and palette change, without changing the plane pixels or colors.
 
-PSG otrzymuje częstotliwości, głośność i rodzaj fali wynikające z oryginalnych
-rejestrów AUDC/AUDF/AUDV. Sekwencje efektów pochodzą z oryginału, lecz szum
-PSG nie odtwarza dokładnie generatorów wielomianowych TIA. RGB555 jest
-przybliżeniem barw dopasowanym do dostarczonych screenshotów, a nie
-analogowym modelem konkretnego telewizora.
-Interfejsy sprzętowe opisują [VGA](https://picocomputer.github.io/vga.html)
-i [RIA](https://picocomputer.github.io/ria.html).
+The PSG receives frequencies, volumes, and waveform types derived from the
+original AUDC/AUDF/AUDV registers. Effect sequences come from the original
+game, but PSG noise does not exactly reproduce the TIA polynomial generators.
+RGB555 approximates the colors of the supplied screenshots rather than
+modeling the analog behavior of a particular television.
+The hardware interfaces are described in the [VGA](https://picocomputer.github.io/vga.html)
+and [RIA](https://picocomputer.github.io/ria.html) documentation.
 
-## Referencje obrazu
+## Visual references
 
-Trzy PNG-y `s_RiverRaid_*.png` i pięć GIF-ów w `original/Atari 5200` są
-odniesieniem dla palety, gór, skarp i układu panelu. PNG-y mają RGB:
-woda (4, 37, 136), ciemny ląd (19, 102, 0), jasny ląd (79, 162, 26),
-skarpa (74, 0, 0), panel (89, 89, 89). Palety GIF-ów i Atari XL są inne;
-obecny port wybiera ciemniejsze kolory PNG-ów 5200.
-Statki mają czerwony kadłub i turkusową dolną część, zbiorniki różowe
-i szare pasy, helikoptery ciemny kadłub i złoty wirnik.
-Host zaokrągla kolory do RGB555; mapowanie ról kolorów w `src/graphics.h`
-zachowuje oryginalne przełączanie B&W i wygaszacz. Kolory nieobecne
-w screenshotach nadal korzystają z przybliżenia odcienia TIA.
+The three `s_RiverRaid_*.png` files and five GIFs in `original/Atari 5200`
+serve as references for the palette, mountains, banks, and panel layout.
+The PNGs use these RGB values: water (4, 37, 136), dark land (19, 102, 0),
+light land (79, 162, 26), rim (74, 0, 0), and panel (89, 89, 89).
+The GIF and Atari XL palettes differ; the current port selects the darker
+colors from the 5200 PNGs.
+Ships have red hulls and turquoise lower sections, fuel tanks have pink
+and gray stripes, and helicopters have dark bodies and gold rotors.
+The host rounds colors to RGB555; the color-role mapping in `src/graphics.h`
+preserves the original B&W switching and screensaver. Colors absent from
+the screenshots still use an approximation of the TIA hue.
 
-Trzy GIF-y w `original/Atari XL` i dziesięć JPEG-ów w `original/Atari 2600`
-służą także do porównywania obiektów. Logika i generator trasy pochodzą
-z 2600; ten port rozwija wygląd na podstawie XL/5200, a nie odtwarza rastra
-ani reguł wersji XL/5200 1:1. Balony i czołgi są rozszerzeniami portu;
-ich czytelne bitmapy w `src/graphics.h` odtwarzają sylwetki z PNG-ów 5200.
-Oryginalny obraz danych 2600 pozostaje niezmieniony.
+The three GIFs in `original/Atari XL` and ten JPEGs in `original/Atari 2600`
+are also used to compare objects. The game logic and course generator come
+from the 2600; this port develops the appearance using XL/5200 references
+rather than reproducing the XL/5200 raster or rules exactly. Balloons and
+tanks are extensions of the port; their readable bitmaps in `src/graphics.h`
+reproduce the silhouettes from the 5200 PNGs. The original 2600 data image
+remains unchanged.
 
-Skala paliwa pozostaje czarna dla obu graczy; ruchomy wskaźnik jest żółty.
-Samolot drugiego gracza zachowuje czarną barwę z wcześniejszego wariantu
-2600; panel i wynik obu graczy korzystają teraz z barw wzorowanych na 5200.
-Lewy czarny pas blankingu HMOVE widoczny na obrazach Atari nie jest odtwarzany.
-Screenshoty pokazują pojedyncze stany gry, więc nie potwierdzają jeszcze
-zgodności faz ruchu, kolizji i animacji klatka po klatce.
+The fuel scale remains black for both players; the moving indicator is yellow.
+The second player's plane retains the black color from the earlier 2600
+variation; the panel and score for both players now use 5200-inspired colors.
+The black HMOVE blanking bar on the left of the Atari images is not reproduced.
+Screenshots show individual game states, so they do not yet confirm movement,
+collision, and animation timing on a frame-by-frame basis.
 
-## Weryfikacja i ograniczenia
+## Verification and limitations
 
-`python tests/emulator_checks.py` sprawdza rzeczywisty ROM w RP6502-EMU
-przy 8 MHz: wejście, pauzę, paliwo, trafienia, bonusowe życie, maksymalny
-wynik, generator, śmierć, odradzanie, trudność, zmianę gracza i restart.
-Scenariusz 1200 klatek sprawdza przewijanie z przyspieszaniem i strzelaniem.
-Test terenu porównuje widoczne piksele kafelków, również skarp, z maskami
-kolizji na całej wysokości pola gry. Sprawdza też dopasowanie mostu do brzegów,
-ciągłość brązowego konturu na zakrętach i przejście skarp przez drogę.
-Także pozostałe scenariusze kończące się w grze sprawdzają brak pominiętych
-VSYNC, w tym odradzanie, tankowanie i zmiana gracza. Opcjonalny profil faz
-klatki opisano w `tests/README.md`.
-Testy są wyciszone, więc nie potwierdzają jakości brzmienia.
+`python tests/emulator_checks.py` checks the actual ROM in RP6502-EMU at 8 MHz:
+input, pause, fuel, hits, extra lives, the maximum score, the generator, death,
+respawning, difficulty, player switching, and restarting.
+A 1200-frame scenario checks scrolling with acceleration and firing.
+The terrain test compares visible tile pixels, including rims, with collision
+masks across the full playfield height. It also checks bridge alignment with
+the banks, continuity of the brown contour at bends, and the rim crossing
+the road. The other scenarios that end in gameplay also check for skipped
+VSYNCs, including respawning, refueling, and player switching. The optional
+frame-phase profiler is described in `tests/README.md`.
+The tests are muted, so they do not verify sound quality.
 
-Pozostają odsłuch, porównanie rastra klatka po klatce z emulatorem Atari
-i próba na fizycznym RP6502. Zachowanie logiki zachowano przez użycie
-oryginalnych procedur; nie deklarujemy jeszcze zgodności obrazu i dźwięku 1:1.
+Listening tests, frame-by-frame raster comparisons with an Atari emulator,
+and testing on physical RP6502 hardware remain outstanding. Game logic
+behavior is preserved by using the original routines; exact visual and
+audio equivalence is not yet claimed.

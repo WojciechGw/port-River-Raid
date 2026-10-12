@@ -42,31 +42,31 @@ else()
             ${CMAKE_CURRENT_SOURCE_DIR}/original/riverraid.asm ${RIVER_CORE}
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
-    add_executable(riverride
+    add_executable(riverraid
         src/riverraid.asm src/cover.asm src/main.c ${RIVER_CORE}
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE})
-    target_link_options(riverride PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
-    set_property(TARGET riverride APPEND PROPERTY LINK_DEPENDS
+    target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
+    set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
-    target_include_directories(riverride PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
+    target_include_directories(riverraid PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
     # Keep source symbols for DAP and memory fixtures even in optimized builds.
-    target_compile_options(riverride PRIVATE -g)
+    target_compile_options(riverraid PRIVATE -g)
     option(RIVER_PROFILE "Measure frame phases in XRAM (adds timing overhead)" OFF)
     if(RIVER_PROFILE)
-        target_compile_definitions(riverride PRIVATE RIVER_PROFILE)
+        target_compile_definitions(riverraid PRIVATE RIVER_PROFILE)
     endif()
-    rp6502_map(riverride src/xram.h "XRAM_.*")
-    rp6502_asset(riverride help src/help.txt)
+    rp6502_map(riverraid src/xram.h "XRAM_.*")
+    rp6502_asset(riverraid help src/help.txt)
     # Named assets are read from ROM: on demand; they are not preloaded to XRAM.
-    rp6502_asset(riverride cover.bin ${RIVER_COVER_IMAGE})
-    rp6502_asset(riverride cover-fade.bin ${RIVER_COVER_FADES})
-    rp6502_asset(riverride cover-prompt.bin ${RIVER_COVER_PROMPT})
-    rp6502_asset(riverride demo-footer.bin ${RIVER_FOOTER_IMAGE})
+    rp6502_asset(riverraid cover.bin ${RIVER_COVER_IMAGE})
+    rp6502_asset(riverraid cover-fade.bin ${RIVER_COVER_FADES})
+    rp6502_asset(riverraid cover-prompt.bin ${RIVER_COVER_PROMPT})
+    rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
     # Splash helpers use the free CPU RAM above the original 4 KiB reference ROM.
-    rp6502_byproducts(riverride ${CMAKE_CURRENT_BINARY_DIR}/riverride.splash)
-    rp6502_asset(riverride RAM(0xD000) ${CMAKE_CURRENT_BINARY_DIR}/riverride.splash)
-    rp6502_byproducts(riverride ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
-    rp6502_asset(riverride RAM(0xC000) ${CMAKE_CURRENT_BINARY_DIR}/riverride.rom)
-    rp6502_executable(riverride DATA 0x0300 RESET 0x0300)
-    rp6502_web(riverride)
+    rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)
+    rp6502_asset(riverraid RAM(0xD000) ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)
+    rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.rom)
+    rp6502_asset(riverraid RAM(0xC000) ${CMAKE_CURRENT_BINARY_DIR}/riverraid.rom)
+    rp6502_executable(riverraid DATA 0x0300 RESET 0x0300)
+    rp6502_web(riverraid)
 endif()

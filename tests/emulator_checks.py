@@ -238,7 +238,7 @@ def main():
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     args = parser.parse_args()
     build = args.build.resolve()
-    sym = symbols(build / "riverride.dbg")
+    sym = symbols(build / "riverraid.dbg")
     output = build / "checks"
     output.mkdir(exist_ok=True)
     count = 0
@@ -252,7 +252,7 @@ def main():
         script = output / f"{name}.script"
         script.write_text("\n".join(commands) + "\n", encoding="utf-8")
         process = subprocess.run([
-            str(args.emulator.resolve()), str(build / "riverride.rp6502"),
+            str(args.emulator.resolve()), str(build / "riverraid.rp6502"),
             "--script", str(script), "--mute", "--phi2", "8000", "--seed", "42",
             "--fill", fill, "--save-dir", str(output / "save"),
         ], cwd=ROOT, text=True, capture_output=True, timeout=60)
@@ -296,7 +296,7 @@ def main():
     sys.path.insert(0,str(ROOT / "tools"))
     from rp6502 import ROM
     rom=ROM()
-    rom.add_rom_file(str(build / "riverride.rp6502"))
+    rom.add_rom_file(str(build / "riverraid.rp6502"))
     assets=dict(rom.assets)
     assert assets["cover.bin"]==expected_pixels
     assert assets["cover-fade.bin"]==(build / "cover_fade.bin").read_bytes()

@@ -2,7 +2,7 @@
 
 Po zbudowaniu Release: `python tests/emulator_checks.py`.
 Opcje `--build` i `--emulator` wskazują inny katalog lub emulator.
-Potrzebne są `riverride.rp6502` i odpowiadający plik `riverride.dbg`.
+Potrzebne są `riverraid.rp6502` i odpowiadający plik `riverraid.dbg`.
 Nie są wymagane dodatkowe pakiety Pythona.
 
 Scenariusze uruchamiają rzeczywisty kod CPU przy 8 MHz, bez okna i dźwięku.
