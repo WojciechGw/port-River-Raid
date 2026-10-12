@@ -62,7 +62,7 @@ else()
     rp6502_asset(riverraid cover-fade.bin ${RIVER_COVER_FADES})
     rp6502_asset(riverraid cover-prompt.bin ${RIVER_COVER_PROMPT})
     rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
-    # Splash helpers use the free CPU RAM above the original 4 KiB reference ROM.
+    # Cover helpers and tank extensions share CPU RAM above the reference ROM.
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)
     rp6502_asset(riverraid RAM(0xD000) ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.rom)

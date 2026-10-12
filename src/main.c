@@ -59,6 +59,8 @@ void __fastcall__ reset_terrain(uint8_t color);
 void __fastcall__ hud_glyph(unsigned glyph);
 #define draw_glyph(x,bits) hud_glyph(((unsigned)(x)<<8)|(bits))
 uint8_t __fastcall__ land_xy(unsigned position);
+uint8_t __fastcall__ helicopter_water(unsigned position);
+#define helicopter_water_at(x,y) helicopter_water(((unsigned)(uint8_t)(y)<<8)|(uint8_t)(x))
 uint8_t __fastcall__ mask_land(unsigned position);
 uint8_t __fastcall__ mask_player_land(unsigned position);
 uint16_t __fastcall__ tia_color(uint8_t code);
@@ -92,6 +94,24 @@ typedef struct {
 } tank_t;
 static tank_t tanks[6];
 static uint8_t tank_bonus;
+
+/* Two independent bank tanks, with one harmless round / dangerous splash
+ * each. Keep extension state above the original reference ROM. */
+typedef struct {
+    int16_t x, y, shot_x;
+    uint8_t side, status, cooldown, shot_phase, shot_target, timer, ground_target;
+} bank_tank_t;
+typedef struct {
+    int16_t x,y;
+    uint8_t active,direction;
+} helicopter_shot_t;
+#pragma data-name(push, "SPLASH")
+static bank_tank_t bank_tanks[2]={{0}};
+static uint8_t bank_shot_random=0xa7;
+static helicopter_shot_t helicopter_shots[6]={{0}};
+/* 0 = unassigned block, 1 = normal helicopter, 2 = firing helicopter. */
+static uint8_t helicopter_types[6]={0}, helicopter_spawn=0;
+#pragma data-name(pop)
 typedef struct {
     int16_t native_x, draw_x;
     uint8_t pattern1, pattern2, flags, flip, valid;
@@ -171,6 +191,73 @@ static uint16_t palette_address(uint8_t id)
     return id==BALLOON_ID ? XRAM_BALLOON_PALETTE : id==TANK_ID ? XRAM_TANK_PALETTE :
         XRAM_SPRITE_PALETTES+(uint16_t)id*32;
 }
+#pragma code-name(push, "SPLASH")
+static uint8_t helicopter_type(uint8_t n)
+{
+    /* Assign once per aircraft, preserving its type across rotor frames. */
+    if (!helicopter_types[n]) {
+        ++helicopter_spawn;
+        helicopter_types[n]=G(0xbd)>=5 && !(helicopter_spawn&3) ? 2 : 1;
+    }
+    return G(0xbd)>=5 && helicopter_types[n]==2;
+}
+#pragma code-name(pop)
+static uint8_t helicopter_ink(char pixel,uint8_t type)
+{
+    return pixel=='B' ? (type ? 5 : 1) : pixel=='G' ? 2 : pixel=='R' ? 3 :
+        pixel=='D' ? (type ? 5 : 4) : 0;
+}
+#pragma code-name(push, "SPLASH")
+static void prepare_helicopters(void)
+{
+    uint8_t id,type,x,y,bits,ink;
+    for (id=5;id<=6;++id) {
+        memcpy(sprite_colors[id],helicopter_colors,sizeof(helicopter_colors));
+        for (type=0;type<2;++type) for (y=0;y<32;++y) {
+            memset(row,0,4); bits=0;
+            if (y>=8 && y<17) for (x=0;x<8;++x) {
+                ink=helicopter_ink(helicopter_pixels[id-5][y-8][x],type);
+                if (!ink) continue;
+                bits|=0x80>>x;
+                row[x>>1]|=ink<<((x&1) ? 0 : 4);
+            }
+            if (!type) masks[id][y]=bits;
+            upload(image_address(id)+(uint16_t)type*128+(uint16_t)y*4,row,4);
+        }
+    }
+    memset(row,0,16); row[5]=row[6]=0xee;
+    upload(XRAM_HELICOPTER_SHOT,row,16);
+}
+static void prepare_tank_animation(void)
+{
+    uint8_t y,x;
+    widths[TANK_ID]=TANK_WIDTH; scales[TANK_ID]=1;
+    memcpy(sprite_colors[TANK_ID],tank_colors,sizeof(tank_colors));
+    for (y=0;y<TANK_IMAGE_HEIGHT;++y) {
+        memset(row,0,TANK_IMAGE_WIDTH/2);
+        if (y<TANK_HEIGHT) for (x=0;x<TANK_WIDTH;++x) {
+            if (tank_pixels[y][x]!='.')
+                row[x>>1]|=(tank_pixels[y][x]-'0')<<((x&1) ? 0 : 4);
+        }
+        upload(XRAM_TANK_IMAGE+(uint16_t)y*(TANK_IMAGE_WIDTH/2),row,TANK_IMAGE_WIDTH/2);
+    }
+    xram0_read(row,XRAM_TANK_IMAGE,TANK_IMAGE_BYTES);
+    upload(XRAM_TANK_IMAGE_ALT,row,TANK_IMAGE_BYTES);
+    for (y=0;y<3;++y) {
+        memset(row,0,TANK_IMAGE_WIDTH/2);
+        for (x=0;x<TANK_WIDTH;++x)
+            if (tank_tracks_alt[y][x]!='.')
+                row[x>>1]|=(tank_tracks_alt[y][x]-'0')<<((x&1) ? 0 : 4);
+        upload(XRAM_TANK_IMAGE_ALT+(uint16_t)(6+y)*(TANK_IMAGE_WIDTH/2),row,TANK_IMAGE_WIDTH/2);
+    }
+}
+static uint16_t tank_image(void)
+{
+    /* Tracks alternate every fourth native frame, half the rotor cadence.
+     * The native counter stops automatically when the game pauses. */
+    return FRAME&4 ? XRAM_TANK_IMAGE_ALT : XRAM_TANK_IMAGE;
+}
+#pragma code-name(pop)
 static uint8_t terrain_row(uint8_t y)
 {
     uint16_t n=(uint16_t)ring_top+y;
@@ -440,14 +527,14 @@ static void prepare_images(void)
         }
         upload((id==1 ? XRAM_SMALL_MOUNTAIN : XRAM_MEDIUM_MOUNTAIN)+(uint16_t)y*16,row,16);
     }
-    for (id=BALLOON_ID;id<=TANK_ID;++id) {
+    id=BALLOON_ID;
+    {
         widths[id]=8; scales[id]=1;
-        memcpy(sprite_colors[id],id==BALLOON_ID ? balloon_colors : tank_colors,
-            id==BALLOON_ID ? sizeof(balloon_colors) : sizeof(tank_colors));
+        memcpy(sprite_colors[id],balloon_colors,sizeof(balloon_colors));
         for (y=0;y<32;++y) {
             memset(row,0,4); bits=0;
             for (x=0;x<8;++x) {
-                uint8_t pixel=id==BALLOON_ID ? balloon_pixels[y][x] : tank_pixels[y][x];
+                uint8_t pixel=balloon_pixels[y][x];
                 if (pixel=='.') continue;
                 j=pixel<='9' ? pixel-'0' : pixel-'A'+10;
                 bits|=0x80>>x;
@@ -459,6 +546,28 @@ static void prepare_images(void)
     }
     xram0_set(BULLET_IMAGE,0,16);
     for (y=0;y<8;++y) xram0_poke8(BULLET_IMAGE+y*2,0x80);
+    for (y=0;y<8;++y) {
+        memset(row,0,4);
+        for (x=0;x<8;++x) if (tank_blast_pixels[y][x]!='.')
+            row[x>>1]|=(x&1) ? 14 : 0xe0;
+        upload(XRAM_TANK_BLAST+y*4,row,4);
+        if (y<4) {
+            memset(row,0,4);
+            for (x=0;x<8;++x) if (tank_shell_pixels[y][x]!='.')
+                row[x>>1]|=(x&1) ? 7 : 0x70;
+            upload(XRAM_TANK_SHELL+y*4,row,4);
+        }
+    }
+    for (id=0;id<3;++id) for (y=0;y<16;++y) {
+        memset(row,0,4);
+        for (x=0;x<8;++x) if (tank_circle_pixels[id][y][x]!='.')
+            row[x>>1]|=(x&1) ? 1 : 0x10;
+        upload(XRAM_TANK_CIRCLES+(uint16_t)id*64+y*4,row,4);
+    }
+    xram0_poke16(XRAM_TANK_EXPLOSION_PALETTE,0);
+    xram0_poke16(XRAM_TANK_EXPLOSION_PALETTE+2,RGB(31,31,31));
+    prepare_tank_animation();
+    prepare_helicopters();
 }
 static void jet_image(void)
 {
@@ -530,9 +639,15 @@ static int16_t object_x(uint8_t n)
 }
 static uint8_t mountain_variant(uint8_t n)
 { return (G(0xa6+n)^(G(0xac+n)>>3)^G(0x94+n))%3; }
+#pragma code-name(push, "SPLASH")
 static uint8_t opaque(uint8_t id,uint8_t x,uint8_t y,uint8_t flip,uint8_t block)
 {
     if (x>=widths[id] || y>=32) return 0;
+    if (id==TANK_ID) {
+        if (y<TANK_TOP || y>=TANK_TOP+TANK_HEIGHT) return 0;
+        y-=TANK_TOP; if (flip) x=TANK_WIDTH-1-x;
+        return y>=6 && (FRAME&4) ? tank_tracks_alt[y-6][x]!='.' : tank_pixels[y][x]!='.';
+    }
     if (id==9) return mountain_pixel(mountain_variant(block),y,flip ? 31-x : x)!='.';
     if (scales[id]==2) x>>=1; else if (scales[id]==4) x>>=2;
     if (flip) x=7-x;
@@ -575,12 +690,269 @@ static void destroy_tank(uint8_t n)
 {
     tanks[n].status=2; tanks[n].explosion=12; tank_bonus=1;
 }
+
+static void bank_round_hits_fuel(bank_tank_t *t);
+static void helicopter_shots_tick(uint8_t scroll)
+{
+    uint8_t n,id;
+    int16_t y;
+    helicopter_shot_t *s;
+    if (ready || MODE) return;
+    for (n=0;n<6;++n) {
+        s=helicopter_shots+n;
+        if (s->active) {
+            s->y+=scroll; s->x+=s->direction ? -2 : 2;
+            /* All four opaque columns must remain in water. Native land
+             * masks include brown rims and central islands. */
+            if (s->y>=159 || s->x<=-8 || s->x>=160 ||
+                !helicopter_water_at(s->x+2,s->y+1)) s->active=0;
+            else continue;
+            /* Replace a spent shot in this same tick, without a cooldown. */
+        }
+        id=ID(n);
+        if ((id!=5 && id!=6) || !helicopter_type(n)) continue;
+        y=128+OFFSET-(int16_t)n*32+12;
+        if (y<0 || y>=160) continue;
+        s->direction=(OBJSTATE(n)&8)!=0;
+        s->x=object_x(n)+(s->direction ? -6 : 6); s->y=y;
+        if (helicopter_water_at(s->x+2,y+1)) s->active=1;
+    }
+}
+static void helicopter_shots_collisions(void)
+{
+    uint8_t n,y,x,bits,px=PX+(reflected!=0);
+    int16_t dx;
+    helicopter_shot_t *s;
+    if (ready || MODE) return;
+    for (n=0;n<6;++n) {
+        s=helicopter_shots+n;
+        if (!s->active || s->y+1<142 || s->y+1>=160) continue;
+        y=s->y+1-142;
+        bits=G(JET_ADDRESS+18-y);
+        for (x=0;x<8;++x) if (bits&(reflected ? (1<<x) : (0x80>>x))) {
+            dx=px+x-s->x;
+            if (dx>=2 && dx<6) {rr_tank_crash(); return;}
+        }
+    }
+}
+static void helicopter_shots_render(void)
+{
+    uint8_t n;
+    sprite_t *s;
+    for (n=0;n<6;++n) if (helicopter_shots[n].active) {
+        /* A helicopter and a bridge tank cannot occupy the same block.
+         * Their companion descriptor therefore serves either extension. */
+        s=sprites+n+10;
+        if (s->y!=-256) continue;
+        s->x=helicopter_shots[n].x*2; s->y=RIVER_TOP+helicopter_shots[n].y;
+        s->image=XRAM_HELICOPTER_SHOT; s->palette=XRAM_PALETTE;
+        s->size=0x01; s->options=0x42;
+    }
+}
+static void clear_enemy_shots(void)
+{
+    bank_tanks[0].shot_phase=bank_tanks[1].shot_phase=0;
+    memset(helicopter_shots,0,sizeof(helicopter_shots));
+}
+static uint8_t bank_choose_target(bank_tank_t *t)
+{
+    uint8_t y,r,a,b,left=0,right=160,count;
+    /* The largest circle spans eight logical columns and sixteen rows.
+     * Intersect actual water intervals across its entire footprint. When
+     * an island splits the river, stay in the channel facing this tank. */
+    if (t->y<8-TANK_MUZZLE_Y || t->y>152-TANK_MUZZLE_Y) return 0;
+    for (y=0;y<16;++y) {
+        r=terrain_row(t->y+TANK_MUZZLE_Y-8+y);
+        a=river_left[r]; b=river_right[r];
+        if (a>=b) return 0;
+        if (b==80) b=160-a;
+        else if (t->side) {r=a; a=160-b; b=160-r;}
+        if (a>left) left=a;
+        if (b<right) right=b;
+        if (left>=right || right-left<8) return 0;
+    }
+    /* Separate random state preserves the original course generator.
+     * Scale into all legal circle origins, including both endpoints. */
+    bank_shot_random=(bank_shot_random>>1)^((bank_shot_random&1) ? 0xb8 : 0);
+    count=right-left-7;
+    t->shot_target=left+(((uint16_t)bank_shot_random*count)>>8);
+    return 1;
+}
+static void bank_tanks_tick(uint8_t scroll)
+{
+    uint8_t n,y,r,edge;
+    int16_t target,sy;
+    bank_tank_t *t;
+    for (n=0;n<2;++n) {
+        t=bank_tanks+n;
+        if (!t->status) continue;
+        t->y+=scroll;
+        if (t->y>=160) {memset(t,0,sizeof(*t)); continue;}
+        /* Follow the terrain through death and attract mode, even while
+         * approach, firing and explosion timers are stopped. */
+        if (ready || MODE) continue;
+        if (t->status==2) {
+            if (t->timer) --t->timer;
+            continue;
+        }
+        /* Fit every opaque tank row on real ground, with a two-pixel gap.
+         * Sampling the entire body also handles a sharply sloping shore. */
+        target=t->ground_target;
+        if (!target) {
+            edge=t->side ? 0 : 160;
+            for (y=TANK_TOP;y<TANK_TOP+TANK_HEIGHT;++y) {
+                sy=t->y+y; if (sy<0 || sy>=160) continue;
+                r=terrain_row(sy);
+                if (t->side) {
+                    if (player_outer_right[r]>edge) edge=player_outer_right[r];
+                } else if (player_outer_left[r]<edge) edge=player_outer_left[r];
+            }
+            target=t->side ? edge+2 : (int16_t)edge-TANK_WIDTH-2;
+            if (target<0) target=0;
+            if (target>160-TANK_WIDTH) target=160-TANK_WIDTH;
+            /* The tank and its ground move down together. Its destination
+             * is a world coordinate; scrolling does not change this edge. */
+            t->ground_target=target;
+        }
+        if (!(FRAME&1)) {
+            if (t->x<target) ++t->x;
+            else if (t->x>target) --t->x;
+        }
+        if (t->cooldown) --t->cooldown;
+        if (t->shot_phase==1) {
+            t->shot_x+=t->side ? -2 : 2;
+            bank_round_hits_fuel(t);
+            if (!t->shot_phase) continue;
+            if (t->side ? t->shot_x<=t->shot_target : t->shot_x>=t->shot_target) {
+                t->shot_x=t->shot_target; t->shot_phase=2; t->timer=18;
+            }
+        } else if (t->shot_phase==2) {
+            if (--t->timer==0) t->shot_phase=0;
+        } else if (t->x==target && !t->cooldown) {
+            if (!bank_choose_target(t)) {t->cooldown=8; continue;}
+            t->shot_x=t->side ? t->x-6 : t->x+TANK_WIDTH-2;
+            t->shot_phase=1; t->cooldown=90;
+        }
+    }
+    /* Native blocks arrive every 32 rows. Separate tanks by at least two
+     * blocks; reuse native scenery seeds without consuming its random state. */
+    if (ready || MODE || G(0xbd)<7 || !scroll || OFFSET>=scroll || ID(4)==8 || ID(4)==9) return;
+    for (n=0;n<2;++n) if (bank_tanks[n].status && bank_tanks[n].y<64) return;
+    for (n=0;n<2;++n) if (!bank_tanks[n].status) {
+        t=bank_tanks+n;
+        t->side=(G(0xaa)^G(0xb0)^G(0xbd))&1;
+        t->x=t->side ? 160 : -8; t->y=OFFSET;
+        t->status=1; t->cooldown=20;
+        break;
+    }
+}
+
+/* Each size is visible for three frames, followed by three clear frames.
+ * 255 hides the sprite and disables its collision, including the final gap. */
+static const uint8_t tank_explosion_phases[19]={
+    255,255,255,255,2,2,2,255,255,255,1,1,1,255,255,255,0,0,0
+};
+static uint8_t tank_explosion_stage(uint8_t timer)
+{ return tank_explosion_phases[timer]; }
+
+static void bank_round_hits_fuel(bank_tank_t *t)
+{
+    uint8_t n,x,y;
+    int16_t ox,oy,dx,dy;
+    if (t->shot_phase!=1) return;
+    for (n=0;n<6;++n) {
+        if (ID(n)!=10) continue;
+        ox=object_x(n); oy=128+OFFSET-(int16_t)n*32;
+        if (t->shot_x+6<=ox || t->shot_x+2>=ox+widths[10]) continue;
+        for (y=TANK_MUZZLE_Y;y<TANK_MUZZLE_Y+2;++y) {
+            dy=t->y+y-oy; if (dy<0 || dy>=32) continue;
+            for (x=2;x<6;++x) {
+                dx=t->shot_x+x-ox;
+                if (dx>=0 && dx<widths[10] && opaque(10,dx,dy,(OBJSTATE(n)&8)!=0,n)) {
+                    /* Use the native explosion sequence and sound, while
+                     * leaving the player's score and missile untouched. */
+                    ID(n)=1; G(0xfa)=23; t->shot_phase=0; return;
+                }
+            }
+        }
+    }
+}
+
+static void bank_tanks_collisions(void)
+{
+    uint8_t n,y,x,bits,stage,px=PX+(reflected!=0);
+    int16_t dy,dx,by=153-(int16_t)MY;
+    bank_tank_t *t;
+    if (ready || MODE) return;
+    for (n=0;n<2;++n) {
+        t=bank_tanks+n;
+        if (t->status!=1) continue;
+        if (!tank_bonus && MY<=161 && MX>=t->x && MX<t->x+TANK_WIDTH) {
+            for (y=0;y<8;++y) {
+                dy=by+y-t->y;
+                if (dy>=0 && dy<32 && opaque(TANK_ID,MX-t->x,dy,t->side,0)) {
+                    t->status=2; t->timer=12; t->shot_phase=0;
+                    MY=180; tank_bonus=1; break;
+                }
+            }
+        }
+        if (t->status!=1 || t->shot_phase!=2) continue;
+        stage=tank_explosion_stage(t->timer);
+        if (stage==255) continue;
+        /* Traveling rounds are safe, as in the 5200 manual. Only opaque
+         * splash pixels are tested against opaque native jet pixels. */
+        for (y=0;y<18;++y) {
+            dy=142+y-(t->y+TANK_MUZZLE_Y-8); if (dy<0 || dy>=16) continue;
+            bits=G(JET_ADDRESS+18-y);
+            for (x=0;x<8;++x) if (bits&(reflected ? (1<<x) : (0x80>>x))) {
+                dx=px+x-t->shot_x;
+                if (dx>=0 && dx<8 && tank_circle_pixels[stage][dy][dx]!='.') {
+                    rr_tank_crash(); return;
+                }
+            }
+        }
+    }
+}
+
+static void bank_tanks_render(void)
+{
+    uint8_t n,stage;
+    bank_tank_t *t;
+    sprite_t *s;
+    for (n=0;n<2;++n) {
+        t=bank_tanks+n;
+        if (!t->status) continue;
+        s=sprites+16+n*2;
+        s->x=t->x*2; s->y=RIVER_TOP+t->y;
+        s->image=tank_image(); s->palette=XRAM_TANK_PALETTE;
+        s->y+=TANK_TOP;
+        /* Hardware mirrors padded storage; cancel its three blank columns. */
+        if (t->side) s->x-=(TANK_IMAGE_WIDTH-TANK_WIDTH)*2;
+        s->size=0x32; s->options=0x42|(t->side ? 0x10 : 0);
+        if (t->status==2) {
+            if (!t->timer) {s->y=-256; continue;}
+            s->x=t->x*2; s->image=XRAM_TANK_BLAST; s->palette=XRAM_PALETTE; s->size=0x11;
+        } else if (t->shot_phase) {
+            stage=t->shot_phase==2 ? tank_explosion_stage(t->timer) : 0;
+            if (stage==255) continue;
+            ++s; s->x=t->shot_x*2;
+            s->y=RIVER_TOP+t->y+(t->shot_phase==1 ? TANK_MUZZLE_Y-1 : TANK_MUZZLE_Y-8);
+            s->image=t->shot_phase==1 ? XRAM_TANK_SHELL :
+                XRAM_TANK_CIRCLES+(uint16_t)stage*64;
+            s->palette=t->shot_phase==1 ? XRAM_PALETTE : XRAM_TANK_EXPLOSION_PALETTE;
+            s->size=t->shot_phase==1 ? 0x01 : 0x31; s->options=0x42;
+        }
+    }
+}
+#pragma code-name(pop)
 static void collisions(void)
 {
     static uint8_t n,y,x,bits,id,scale,flip,px,jbits;
     static int16_t ox,oy,sy,dy,dx,by;
     px=PX+(reflected!=0); by=153-(int16_t)MY;
     G(0xe2)=G(0xe4)=G(0xe6)=G(0xe8)=255; tank_bonus=0;
+    bank_tanks_collisions();
+    helicopter_shots_collisions();
     for (n=6;n>0;) {
         --n; /* The TIA kernel visits upper blocks before lower blocks. */
         id=ID(n); if (id>BALLOON_ID) continue;
@@ -589,7 +961,7 @@ static void collisions(void)
             static int16_t tx;
             static uint8_t tf;
             tx=tanks[n].x; tf=tanks[n].direction;
-            if (MY<=161 && MX>=tx && MX<tx+8) {
+            if (MY<=161 && MX>=tx && MX<tx+TANK_WIDTH) {
                 for (y=0;y<8;++y) {
                     dy=by+y-oy;
                     if (dy>=0 && dy<32 && opaque(TANK_ID,MX-tx,dy,tf,0)) {
@@ -599,13 +971,13 @@ static void collisions(void)
                     }
                 }
             }
-            if (tanks[n].status==1 && tx+8>px && tx<px+8 && oy<=159 && oy+32>142) {
+            if (tanks[n].status==1 && tx+TANK_WIDTH>px && tx<px+8 && oy<=159 && oy+32>142) {
                 for (y=0;y<18;++y) {
                     dy=142+y-oy; if (dy<0 || dy>=32) continue;
                     jbits=G(JET_ADDRESS+18-y);
                     for (x=0;x<8;++x) if (jbits&(reflected ? (1<<x) : (0x80>>x))) {
                         dx=px+x-tx;
-                        if (dx>=0 && dx<8 && opaque(TANK_ID,dx,dy,tf,0)) {
+                        if (dx>=0 && dx<TANK_WIDTH && opaque(TANK_ID,dx,dy,tf,0)) {
                             rr_tank_crash(); goto tank_checked;
                         }
                     }
@@ -813,6 +1185,9 @@ static void render(void)
     static uint8_t n,id;
     static uint16_t c;
     if (paused) sync_tanks();
+    /* Native death freezes game ticks. Remove their last projectile frame
+     * before presenting the jet explosion, including deaths from terrain. */
+    if (MODE>=128) clear_enemy_shots();
     for (n=0;n<SPRITE_COUNT;++n) sprites[n].y=-256;
     jet_image();
     sprites[0].x=(PX+(reflected!=0))*2; sprites[0].y=RIVER_TOP+142;
@@ -826,8 +1201,10 @@ static void render(void)
     }
     for (n=0;n<6;++n) {
         id=ID(n); if (id>BALLOON_ID) continue;
+        if (id!=5 && id!=6) helicopter_types[n]=0;
         sprites[n+2].x=object_x(n)*2; sprites[n+2].y=RIVER_TOP+128+OFFSET-(int16_t)n*32;
         sprites[n+2].image=image_address(id);
+        if ((id==5 || id==6) && helicopter_type(n)) sprites[n+2].image+=128;
         if (id==9) sprites[n+2].image=mountain_variant(n)==0 ? XRAM_IMAGES+9*IMAGE_BYTES :
             mountain_variant(n)==1 ? XRAM_SMALL_MOUNTAIN : XRAM_MEDIUM_MOUNTAIN;
         sprites[n+2].palette=palette_address(id);
@@ -847,12 +1224,18 @@ static void render(void)
         if (id==8 && (tanks[n].status==1 || tanks[n].explosion)) {
             uint8_t ti=tanks[n].status==1 ? TANK_ID : 1;
             sprites[n+10].x=tanks[n].x*2; sprites[n+10].y=sprites[n+2].y;
-            sprites[n+10].image=image_address(ti);
+            sprites[n+10].image=ti==TANK_ID ? tank_image() : image_address(ti);
             sprites[n+10].palette=palette_address(ti);
             sprites[n+10].size=0x71;
             sprites[n+10].options=0x42|(tanks[n].direction ? 0x10 : 0);
+            if (ti==TANK_ID) {
+                sprites[n+10].y+=TANK_TOP; sprites[n+10].size=0x32;
+                if (tanks[n].direction) sprites[n+10].x-=(TANK_IMAGE_WIDTH-TANK_WIDTH)*2;
+            }
         }
     }
+    bank_tanks_render();
+    helicopter_shots_render();
     terrain.y_pos_px=RIVER_TOP-ring_top;
     /* World position and sprites stay in RAM until the next VSYNC. Publish
      * them together before doing any input, collision or terrain work. */
@@ -1056,11 +1439,17 @@ int main(void)
             if (!(G(0x282)&1) || (old_intro>=128 && MODE<128)) {
                 restart_terrain(); jet_cache=0xffff;
                 memset(tanks,0,sizeof(tanks));
+                memset(bank_tanks,0,sizeof(bank_tanks)); scroll=0;
+                memset(helicopter_shots,0,sizeof(helicopter_shots));
+                memset(helicopter_types,0,sizeof(helicopter_types)); helicopter_spawn=0;
             } else {
                 scroll=(OFFSET-old_offset)&31;
                 if (OFFSET<old_offset && scroll<=4) {
                     memmove(tanks,tanks+1,5*sizeof(tank_t));
                     memset(tanks+5,0,sizeof(tank_t));
+                    memmove(helicopter_shots,helicopter_shots+1,5*sizeof(helicopter_shot_t));
+                    memset(helicopter_shots+5,0,sizeof(helicopter_shot_t));
+                    memmove(helicopter_types,helicopter_types+1,5); helicopter_types[5]=0;
                 }
                 if (scroll>4) rebuild_terrain();
                 else if (scroll) {
@@ -1074,6 +1463,8 @@ int main(void)
                 }
             }
             move_tanks();
+            bank_tanks_tick(scroll);
+            helicopter_shots_tick(scroll);
         }
         PROFILE_PHASE(3);
         render();

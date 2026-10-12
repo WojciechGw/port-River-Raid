@@ -65,6 +65,12 @@ typedef struct {
 #define XRAM_HUD_DIGITS 0x9B00
 #define XRAM_BALLOON_IMAGE 0x9D00
 #define XRAM_TANK_IMAGE 0x9D80
+#define XRAM_TANK_SHELL 0xBE00
+#define XRAM_TANK_BLAST 0xBE10
+#define XRAM_TANK_CIRCLES 0xBE30
+#define XRAM_TANK_IMAGE_ALT 0xBF00
+#define XRAM_TANK_EXPLOSION_PALETTE 0xBF80
+#define XRAM_HELICOPTER_SHOT 0xBF90
 #define XRAM_SCORE_DIGITS 0x9E00
 #define XRAM_GAME_DIGITS (XRAM_SCORE_DIGITS + 12 * 32)
 #define XRAM_BALLOON_PALETTE 0x05C0
@@ -82,10 +88,17 @@ typedef struct {
 #define TERRAIN_BANK_SOLID 7
 #define HUD_SPRITE_COUNT 19
 #define XRAM_RESERVE_IMAGE (XRAM_HUD_DIGITS + 12 * 32)
-#define SPRITE_COUNT 16
+#define SPRITE_COUNT 20
 #define OBJECT_IMAGE_COUNT 13
 #define BALLOON_ID 11
 #define TANK_ID 12
+#define TANK_WIDTH 9
+#define TANK_HEIGHT 9
+#define TANK_TOP 8
+#define TANK_MUZZLE_Y (TANK_TOP + 1)
+#define TANK_IMAGE_WIDTH 12
+#define TANK_IMAGE_HEIGHT 16
+#define TANK_IMAGE_BYTES (TANK_IMAGE_WIDTH * TANK_IMAGE_HEIGHT / 2)
 #define IMAGE_BYTES 512
 #define HUD_BYTES (RIVER_WIDTH * HUD_HEIGHT)
 
@@ -108,7 +121,7 @@ _Static_assert(XRAM_IMAGES + 11 * IMAGE_BYTES + 96 + 1024 <= XRAM_HUD_DIGITS, "D
 _Static_assert(XRAM_RESERVE_IMAGE + 32 <= XRAM_HUD, "Digits overlap HUD");
 _Static_assert(XRAM_RESERVE_IMAGE + 32 <= XRAM_BALLOON_IMAGE, "Reserve overlaps balloon");
 _Static_assert(XRAM_BALLOON_IMAGE + 128 <= XRAM_TANK_IMAGE, "Balloon overlaps tank");
-_Static_assert(XRAM_TANK_IMAGE + 128 <= XRAM_SCORE_DIGITS, "Tank overlaps score digits");
+_Static_assert(XRAM_TANK_IMAGE + TANK_IMAGE_BYTES <= XRAM_SCORE_DIGITS, "Tank overlaps score digits");
 _Static_assert(XRAM_GAME_DIGITS + 2 * 32 <= XRAM_HUD, "Game digits overlap HUD");
 _Static_assert(XRAM_SPRITES + SPRITE_COUNT * 10 <= XRAM_SPRITE_PALETTES, "Sprites overlap palettes");
 _Static_assert(XRAM_TANK_PALETTE + 32 <= XRAM_HUD_SPRITES, "Tank palette overlaps HUD sprites");
@@ -118,4 +131,13 @@ _Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_TERRAIN, "Logo palette overlaps te
 _Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_DEMO_FOOTER_PALETTE, "Logo overlaps demo palette");
 _Static_assert(XRAM_DEMO_FOOTER_PALETTE + 14 <= XRAM_TERRAIN, "Demo palette overlaps terrain");
 _Static_assert(XRAM_HUD + HUD_BYTES <= 65536UL, "XRAM overflow");
+_Static_assert(XRAM_HUD + HUD_BYTES <= XRAM_TANK_SHELL, "HUD overlaps tank shell");
+_Static_assert(XRAM_TANK_SHELL + 16 <= XRAM_TANK_BLAST, "Shell overlaps blast");
+_Static_assert(XRAM_TANK_BLAST + 32 <= 65536UL, "Tank blast overflow");
+_Static_assert(XRAM_TANK_BLAST + 32 <= XRAM_TANK_CIRCLES, "Tank blast overlaps circles");
+_Static_assert(XRAM_TANK_CIRCLES + 3 * 64 <= XRAM_TANK_IMAGE_ALT, "Tank circles overlap animation");
+_Static_assert(XRAM_TANK_IMAGE_ALT + TANK_IMAGE_BYTES <= XRAM_TANK_EXPLOSION_PALETTE, "Tank animation overlaps explosion palette");
+_Static_assert(XRAM_TANK_EXPLOSION_PALETTE + 4 <= 65536UL, "Tank explosion palette overflow");
+_Static_assert(XRAM_TANK_EXPLOSION_PALETTE + 4 <= XRAM_HELICOPTER_SHOT, "Tank palette overlaps helicopter shot");
+_Static_assert(XRAM_HELICOPTER_SHOT + 16 <= 65536UL, "Helicopter shot overflow");
 #endif

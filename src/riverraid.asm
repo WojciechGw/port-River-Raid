@@ -11,6 +11,7 @@
 .importzp ptr1
 .import _row, _bank_half, _tile_mirror
 .export _land_xy
+.export _helicopter_water
 .import _river1, _river2, _ring_top
 .export _mask_land
 .export _mask_player_land
@@ -25,7 +26,7 @@
 
 ; Present the prepared world immediately after VSYNC, before the VGA reaches
 ; RIVER_TOP. Only Y changes in the tile config; dimensions/data stay fixed.
-; 160 sprite bytes + Y take approximately 0.3 ms at 8 MHz. Never publish
+; 200 sprite bytes + Y take approximately 0.4 ms at 8 MHz. Never publish
 ; the scroll origin halfway through expensive terrain/collision processing.
 _present_frame:
     lda #1
@@ -47,7 +48,7 @@ _present_frame:
     lda _sprites,y
     sta RIA_RW0
     iny
-    cpy #160
+    cpy #200
     bne @sprite
     lda #$62
     sta RIA_ADDR0
@@ -384,6 +385,32 @@ _land_xy:
     lda #0
     ldx #0
     rts
+; AX = first opaque projectile column / Y. All four columns must be water.
+; Shared mask scratch is safe: these helpers run sequentially in main.
+_helicopter_water:
+    cmp #157
+    bcs @blocked
+    sta ptr1
+    stx ptr1+1
+    lda #4
+    sta mask_bits
+@column:
+    lda ptr1
+    ldx ptr1+1
+    jsr _land_xy
+    cmp #0
+    bne @blocked
+    inc ptr1
+    dec mask_bits
+    bne @column
+    lda #1
+    ldx #0
+    rts
+@blocked:
+    lda #0
+    ldx #0
+    rts
+
 ; AX = player row origin, scale one. Brown rims are safe for the jet.
 ; Ground intervals come from the renderer, including independent bank widths
 ; on both halves and islands. Keep native PF masks authoritative for water.

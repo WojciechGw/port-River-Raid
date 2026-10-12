@@ -40,6 +40,37 @@ kolorową czaszę, nieprzezroczystą czerń czołgu, generowanie balonu, kolizje
 odbicie od brzegu i 60 punktów. `tank-*` sprawdzają ruch, pauzę, restart,
 przesuwanie stanu wraz z blokiem terenu, punkty 250/750, dodatkowe życie,
 limit rezerw i przepełnienie wyniku. `enemies-5200.png` pokazuje oba dodatki.
+Scenariusze `bank-*` sprawdzają czołgi dojeżdżające z obu stron od mostu 7,
+odstęp od widocznego brzegu, punkty, pauzę, restart i budżet klatki przy 8 MHz.
+Pocisk przelatuje bezpiecznie przez samolot, ale jego wybuch powoduje kolizję.
+Odczyt bitmap potwierdza białe, wypełnione koła o średnicach 4, 8 i 16 pikseli,
+z fazą skasowania po każdym rozmiarze; skasowane koło nie zagraża samolotowi.
+Trafienie FUEL przez pocisk czołgu niszczy zbiornik bez punktów dla gracza;
+pocisk mijający nieprzezroczyste piksele zbiornika nie niszczy go.
+Podglądy: `bank-tanks.png` i `tank-circle-*.png`.
+Scenariusze `bank-random-range-*` sprawdzają różne zasięgi kolejnych strzałów
+z obu stron rzeki, zakręty, wyspy oraz wstrzymanie ognia w zbyt wąskim lub
+zamkniętym kanale. Cały największy wybuch musi mieścić się w wodzie.
+`bank-tank-wider-bitmaps` sprawdza rysunek 9×9, przezroczyste wypełnienie
+sprite'a i obie klatki gąsienic; `bank-tank-ninth-column-*` sprawdzają
+trafienie dziewiątej kolumny i chybienie tuż obok dla obu kierunków czołgu.
+Scenariusze `helicopter-*` sprawdzają obie sylwetki i klatki wirnika, jasny
+poziomy pocisk tylko dla typu 2, oba kierunki lotu pocisku, pauzę, restart,
+kolizję z samolotem oraz budżet klatki przy kilku strzelających helikopterach.
+`helicopter-frequency-level-*` sprawdzają brak typu 2 przed poziomem 5
+i proporcję jednego strzelającego na cztery nowe helikoptery.
+`helicopter-shot-shore-*` sprawdzają znikanie pocisku na obu brzegach
+i z obu stron wyspy; pocisk przelatujący przez wodę pozostaje aktywny.
+`helicopter-shot-immediate-refire-*` sprawdzają klatka po klatce kolejny
+strzał bez przerwy po trafieniu w brzeg, w obu kierunkach.
+`helicopter-shot-refire-blocked-*` sprawdzają, że nie strzela zniszczony
+helikopter, typ 1 ani helikopter z wylotem pocisku na lądzie.
+`helicopter-type-block-scroll` sprawdza zachowanie typu przy zmianie bloku.
+`bank-splash-cleared-on-death-*` sprawdzają natychmiastowe ukrycie obu
+wybuchów i usunięcie pocisków po śmierci gracza, także wskutek kolizji z lądem.
+`bank-tank-last-life-scroll-*` sprawdzają oba brzegi po utracie ostatniego
+życia: zgodne przewijanie czołgu i scenerii, pauzę oraz usunięcie czołgu
+po wyjechaniu poza ekran, bez nowych strzałów i nowych czołgów w trybie demo.
 Scenariusz `hud-record-and-reserves` sprawdza zapis wyniku 500 w polu HI,
 zachowanie rekordu po restarcie oraz zgodność ikon samolotów rezerwowych
 z oryginalnym licznikiem gry.

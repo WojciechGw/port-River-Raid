@@ -48,7 +48,60 @@ awards 250 points; hitting a bridge with a tank on its span destroys both
 objects and awards 750 points in total instead of 500.
 The additional 250 points use the original decimal digit pointers, reserve
 awards every 10,000 points, the limit of nine lives, and score overflow behavior.
-In this version, tanks do not fire or patrol the banks from bridge seven onward.
+From bridge seven, up to two additional tanks approach from the sides,
+stop two logical pixels before the actual ground edge, and shoot onto the
+river. Their placement checks every opaque body row so sloping banks do
+not leave the tracks in the water. Tanks and shots scroll with the terrain;
+pause freezes both, and a restart or respawn clears them.
+Each shot chooses a random range from the actual water boundaries, excluding
+the decorative brown rims. The whole largest impact circle must fit across
+all sixteen of its rows, including bends. An island confines fire to the
+tank's own channel; tanks wait when the channel cannot contain the circle.
+Shot ranges use a separate random state, preserving the native course generator.
+Rounds in flight do not harm the plane; only opaque splash pixels damage it,
+matching the distinction in the 5200 manual. Shooting a bank tank awards
+250 points through the same native scoring routine as a road tank.
+Water explosions use filled white circles with canvas diameters of 4, 8,
+and 16 pixels. Their six phases are small circle, clear, medium circle,
+clear, large circle, clear. Each phase lasts three native frames. All filled
+pixels can collide with the jet; clear phases have no sprite or collision.
+Tank rounds can destroy FUEL depots: the depot enters the native explosion
+animation and plays its explosion sound, without awarding player points or
+consuming the player's own missile. Transparent depot pixels do not stop a round.
+Both road and bank tanks alternate two track frames every fourth native
+frame, at half the helicopter rotor cadence. Pause freezes the animation.
+The turret and body remain fixed; separated black wheels alternate positions.
+Tank collisions follow the opaque pixels of the current track frame.
+The readable tank drawing is 9 logical pixels wide and 9 rows high; each
+logical column occupies two canvas pixels. Its VGA sprite is padded to 12x16
+and placed eight rows below the native block origin. Mirrored sprites compensate
+for the three blank columns so both directions share the same collision bounds.
+Rounds leave the barrel's row, and water explosions remain centered on that
+same trajectory. The entire largest circle is included in the water fit check.
+Readable helicopter drawings also follow the supplied references: salmon
+rotors, green fuselage, a dark blue stripe for type 1 and an olive stripe for
+type 2. Native IDs 5 and 6 remain rotor frames, rather than aircraft types.
+Type 2 starts at level 5 and accounts for every fourth new helicopter;
+the other three use type 1. Each block retains its assigned type across
+rotor animation and scrolling. This counter does not consume native random
+state. Type 2 fires a pale four-column horizontal shot, replacing it in the
+same frame when the previous shot hits the riverbank. Each helicopter has
+at most one active shot. Shots move two logical columns per frame,
+scroll with their source block and collide with opaque
+jet pixels. Pause freezes them, and restart/respawn clears them.
+Shots disappear as soon as any opaque column reaches land, including the
+brown river rim or a central island. A dash is not launched into land.
+The player's death immediately clears enemy rounds and water impact sprites;
+otherwise the native death state would freeze their last animation frame.
+Existing bank tanks keep scrolling with the terrain after the last life,
+until they leave the screen. In attract mode they do not approach or fire,
+and no new bank tanks spawn.
+Helicopter shots reuse the companion sprite slots of blocks without bridge
+tanks, preserving the existing
+200-byte VSYNC sprite upload.
+The port adds these encounters between bridges using the native scenery
+seed without changing the original random-number sequence. Their exact
+spawn cadence and explosion artwork are approximations of the 5200 version.
 Balloon and bridge-with-tank scores are described in the
 [Activision manual for the 5200](https://atariage.com/manual_html_page.php?SoftwareID=2101).
 
@@ -174,8 +227,9 @@ before fade out.
 After fade in, the program waits for any HID key, including function keys
 and modifiers; LED status bits do not dismiss the cover. The dismissal key
 is consumed through its release so it cannot also trigger game controls.
-The code and its few working bytes occupy free CPU memory from $D000,
-after the original ROM, without taking space reserved for the stack or game
+The cover helpers and tank extension code/state share free CPU memory from
+$D000 through $FEFF, after the original ROM and before the reserved I/O page,
+without taking space reserved for the stack or game
 buffers. After fade out, the program restores the footer strip from a ROM
 asset, and game initialization restores the remaining assets in the reused XRAM.
 
@@ -243,7 +297,7 @@ light land (79, 162, 26), rim (74, 0, 0), and panel (89, 89, 89).
 The GIF and Atari XL palettes differ; the current port selects the darker
 colors from the 5200 PNGs.
 Ships have red hulls and turquoise lower sections, fuel tanks have pink
-and gray stripes, and helicopters have dark bodies and gold rotors.
+and gray stripes, and helicopters have dark bodies and salmon rotors.
 The host rounds colors to RGB555; the color-role mapping in `src/graphics.h`
 preserves the original B&W switching and screensaver. Colors absent from
 the screenshots still use an approximation of the TIA hue.

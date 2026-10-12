@@ -39,7 +39,7 @@ static const uint8_t reference_colors[][4] = {
     {0x00,0,0,0}, {0x04,7,7,7}, {0x06,11,11,11}, {0x08,15,15,15},
     {0x0c,22,22,22}, {0x10,9,9,0}, {0x12,13,13,2}, {0x14,17,16,4},
     {0x18,23,23,7}, {0x1c,31,28,16}, {0x1e,31,28,16},
-    {0x20,9,0,0}, {0x2a,29,25,13}, {0x32,13,0,0}, {0x48,23,6,15},
+    {0x20,9,0,0}, {0x2a,29,25,13}, {0x32,13,0,0}, {0x38,31,18,13}, {0x48,23,6,15},
     {0x80,0,4,16}, {0x84,1,9,23}, {0x8c,15,21,30}, {0x9c,16,24,29},
     {0xa8,5,20,19}, {0xac,16,27,29}, {0xb0,0,9,0},
     {0xd2,1,9,0}, {0xd6,6,14,2}, {0xda,19,25,12},
@@ -87,41 +87,133 @@ static const char balloon_pixels[32][9]={
     "........",
     "........"
 };
-/* 5200 road tank: 1 = black turret/body, 2 = grey tracks, . = transparent. */
+/* Reference tank: 1 = opaque black, . = transparent wheel gaps. */
 static const uint8_t tank_colors[3]={0,0x00,0x08};
-static const char tank_pixels[32][9]={
+/* Tank rounds fly horizontally; white impact circles damage the jet.
+ * 7 = black shell, E = pale yellow tank destruction flash (terrain palette). */
+#pragma rodata-name(push, "SPLASH")
+static const char tank_shell_pixels[4][9]={
     "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "..11....",
-    ".1111...",
-    ".1111...",
-    "11111111",
-    ".1111...",
-    ".111111.",
-    "11111111",
-    "11111111",
-    "12121212",
-    "22222222",
-    "21212121",
-    "22222222",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
+    "..7777..",
+    "..7777..",
     "........"
+};
+static const char tank_blast_pixels[8][9]={
+    "...EE...",
+    ".E.EE.E.",
+    "..EEEE..",
+    "EEEEEEEE",
+    "EEEEEEEE",
+    "..EEEE..",
+    ".E.EE.E.",
+    "...EE..."
+};
+/* Second track frame, drawing rows 6..8. Black wheels change position. */
+static const char tank_tracks_alt[3][10]={
+    "1.1.1.1.1",
+    ".........",
+    "1.1.1.1.1"
+};
+/* Reference helicopters facing right. B = black tail, G = dark green,
+ * R = salmon rotor, D = dark blue fuselage stripe. In the firing variant
+ * B and D use olive instead. IDs 5/6 still select the two rotor frames. */
+static const uint8_t helicopter_colors[6]={0,0x00,0xb0,0x38,0x80,0x14};
+static const char helicopter_pixels[2][9][9]={
+    {
+        "...RRRRR",
+        ".....R..",
+        ".....R..",
+        "....GGG.",
+        "B..GGGGG",
+        "DDDDDDDD",
+        "B...GGG.",
+        ".....G..",
+        "....GGG."
+    },
+    {
+        "........",
+        "...RRRRR",
+        ".....R..",
+        "....GGG.",
+        "B..GGGGG",
+        "DDDDDDDD",
+        "B...GGG.",
+        ".....G..",
+        "....GGG."
+    }
+};
+/* Filled white water explosions: 4, 8 and 16 canvas pixels in diameter.
+ * Logical pixels are twice as wide as high. W = white, . = transparent. */
+static const char tank_circle_pixels[3][16][9]={
+    {
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
+        "...WW...",
+        "...WW...",
+        "...WW...",
+        "...WW...",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........",
+        "........"
+    },
+    {
+        "........",
+        "........",
+        "........",
+        "........",
+        "...WW...",
+        "..WWWW..",
+        "..WWWW..",
+        "..WWWW..",
+        "..WWWW..",
+        "..WWWW..",
+        "..WWWW..",
+        "...WW...",
+        "........",
+        "........",
+        "........",
+        "........"
+    },
+    {
+        "...WW...",
+        "..WWWW..",
+        ".WWWWWW.",
+        ".WWWWWW.",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        "WWWWWWWW",
+        ".WWWWWW.",
+        ".WWWWWW.",
+        "..WWWW..",
+        "...WW..."
+    }
+};
+#pragma rodata-name(pop)
+/* Reference outline, widened to nine columns as requested. Visible 9x9
+ * drawing, positioned eight rows below the native block origin.
+ * Sprite storage is padded to 12x16 by prepare_tank_animation(). */
+static const char tank_pixels[9][10]={
+    "...11....",
+    "...111111",
+    "...11....",
+    ".1111111.",
+    "111111111",
+    "111111111",
+    ".1.1.1.1.",
+    ".........",
+    ".1.1.1.1."
 };
 
 /* Mountain silhouettes sampled from original/Atari XL/image0.png.

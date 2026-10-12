@@ -705,22 +705,166 @@ def main():
 
     # 5200 additions use uploaded readable assets and actual game collisions.
     _, images = case("5200-enemy-bitmaps", boot + [
-        "dump xram:0x9d00 128", "dump xram:0x9d80 128", "dump xram:0x05e0 6"])
+        "dump xram:0x9d00 128", "dump xram:0x9d80 96", "dump xram:0x05e0 6"])
     balloon, tank, palette = images
     assert balloon[9*4:15*4] == bytes([ink*17 for ink in range(4,10) for _ in range(4)])
-    assert tank[16*4:17*4] == bytes([0x12]*4)
+    assert tank[4*6:5*6] == bytes([0x11]*4+[0x10,0])
     assert palette[:4] == bytes([0,0,32,0]), "Black tank body must be opaque"
     case("balloon-crash", fixture + object_at(0,11) + resume + ["peek xram:0x0082 2"])
     _, states = case("balloon-bank-bounce", fixture + [poke(0xbd,2), poke(0x8f,64)] +
         object_at(1,11,8) + resume + ["dump 0x9b 1", "peek 0xa1 11"])
     assert states[-1][0]&8, "Balloon failed to reverse at the bank"
 
+    # The two native IDs are rotor phases. Both aircraft variants preserve
+    # those phases; only type 2 launches the horizontal pale projectile.
+    _, images=case("helicopter-reference-bitmaps",boot + [
+        "dump xram:0x8a00 128","dump xram:0x8a80 128",
+        "dump xram:0x8c00 128","dump xram:0x8c80 128",
+        "dump xram:0xbf90 16"])
+    for index,image in enumerate(images[:4]):
+        assert image[13*4:14*4]==bytes([0x55 if index&1 else 0x44]*4)
+        assert not any(image[:8*4]) and not any(image[17*4:])
+    assert images[0][8*4:10*4]!=images[2][8*4:10*4], "Rotor frames do not differ"
+    assert images[0][11*4:12*4]==images[2][11*4:12*4], "Rotor animation changes the fuselage"
+    assert images[-1]==bytes([0]*5+[0xee,0xee]+[0]*9)
+    for level in (4,5,20):
+        commands=fixture + [poke(0xbd,level),poke(sym["helicopter_types"],[0]*6),
+            poke(sym["helicopter_spawn"],0)]
+        for _ in range(12):
+            commands += object_at(2,5,76) + [poke(sym["helicopter_types"]+2,0),
+                "run 2",f'dump 0x{sym["helicopter_types"]+2:04x} 1',"dump xram:0x0328 10"]
+        _, samples=case(f"helicopter-frequency-level-{level}",commands)
+        firing=[]
+        for i,(state,descriptor) in enumerate(zip(samples[::2],samples[1::2])):
+            expected=level>=5 and i%4==3
+            assert (state[0]==2)==expected, "Firing helicopter frequency or minimum level differs"
+            assert (struct.unpack_from("<H",descriptor,4)[0]==0x8a80)==expected
+            firing.append(state[0]==2)
+        assert sum(firing)==(3 if level>=5 else 0)
+    commands=boot + [poke(0xbd,5),poke(sym["helicopter_types"],[0]*6),
+        poke(sym["helicopter_spawn"],0)]
+    for _ in range(12):
+        commands += ["run 240","dump 0xa0 18","dump xram:0x0300 200"]
+    _, samples=case("helicopter-natural-variants",commands)
+    types=set()
+    for state,descriptors in zip(samples[::2],samples[1::2]):
+        for n,kind in enumerate(state[:6]):
+            if kind in (5,6):
+                address=struct.unpack_from("<H",descriptors,(n+2)*10+4)[0]
+                types.add(address in (0x8a80,0x8c80))
+    assert types=={False,True}, "Native course does not show both helicopter variants"
+    for kind in (0,1):
+        for direction in (0,1):
+            _, buffers=case(f"helicopter-firing-{kind}-{direction}",fixture +
+                object_at(2,5,76) + [poke(0xbd,5),poke(sym["helicopter_types"]+2,kind+1),
+                poke(0x9c,0x50|direction*8),
+                poke(sym["helicopter_shots"],[0]*36)] + resume + [
+                f'dump 0x{sym["helicopter_shots"]:04x} 36',"dump xram:0x0300 200",
+                "press p","run 3","release p","run 3",
+                f'dump 0x{sym["helicopter_shots"]:04x} 36',"run 60",
+                f'dump 0x{sym["helicopter_shots"]:04x} 36',
+                f'shot "{(output / f"helicopter-{kind}-{direction}.png").as_posix()}"'])
+            state,descriptors,paused0,paused1=buffers
+            assert bool(state[2*6+4])==bool(kind), "Wrong helicopter type fired"
+            assert paused0==paused1, "Helicopter fire moves during pause"
+            address=struct.unpack_from("<H",descriptors,40+4)[0]
+            assert address in ((0x8a80,0x8c80) if kind else (0x8a00,0x8c00))
+            if kind:
+                sx,sy=struct.unpack_from("<hh",state,12)
+                assert sy==76 and (58<=sx<=64 if direction else 88<=sx<=94), \
+                    f"Helicopter shot moves in the wrong direction: {sx},{sy}"
+                assert struct.unpack_from("<H",descriptors,120+4)[0]==0xbf90
+    for y,crashes in ((145,True),(140,False)):
+        case(f"helicopter-shot-jet-{y}",fixture + [
+            poke(sym["helicopter_shots"],list(struct.pack("<hh2B",76,y,1,1)))] +
+            resume + [f"peek xram:0x0082 {2 if crashes else 1}"])
+    _, states=case("helicopter-shot-restart",fixture + [
+        poke(sym["helicopter_shots"],list(struct.pack("<hh2B",60,60,1,0)))] +
+        resume + ["press r","run 4","release r","run 4",
+        f'dump 0x{sym["helicopter_shots"]:04x} 36'])
+    assert states[-1]==bytes(36), "Restart retained helicopter fire"
+    crowded=fixture + [poke(0xbd,5),poke(sym["helicopter_types"],[2]*6)]
+    for block in range(6):
+        crowded+=object_at(block,5,50)
+    case("helicopters-frame-budget",crowded + resume + ["run 120"])
+
+    # Rims count as shore for the dash, even though they are safe for the
+    # player's plane. Check outer banks and both island-facing channels.
+    for island in (False,True):
+        for direction in (0,1):
+            x=(102 if direction else 52) if island else (44 if direction else 110)
+            _, states=case(f"helicopter-shot-shore-{island}-{direction}",fixture + [
+                poke(sym["river1"],[255]*192),poke(sym["river2"],[255]*192),
+                poke(sym["river_left"],[20 if island else 42]*192),
+                poke(sym["river_right"],[60 if island else 80]*192),
+                poke(sym["helicopter_shots"],list(struct.pack("<hh2B",x,76,1,direction))),
+                "run 3","dump xram:0x0364 10"] + resume + [
+                f'dump 0x{sym["helicopter_shots"]:04x} 6',"dump xram:0x0364 10"])
+            before,state,after=states
+            assert struct.unpack_from("<h",before,2)[0]!=-256
+            assert state[4]==0 and struct.unpack_from("<h",after,2)[0]==-256, \
+                "Helicopter projectile passed through the bank or island"
+    for direction in (0,1):
+        x=44 if direction else 100
+        _, states=case(f"helicopter-shot-stays-in-water-{direction}",fixture + [
+            poke(sym["river1"],[255]*192),poke(sym["river2"],[255]*192),
+            poke(sym["river_left"],[42]*192),poke(sym["river_right"],[80]*192),
+            poke(sym["helicopter_shots"],list(struct.pack("<hh2B",x,76,1,1-direction)))] +
+            resume + [f'dump 0x{sym["helicopter_shots"]:04x} 6'])
+        assert states[0][4]==1, "Water incorrectly stops a helicopter projectile"
+
+    # Watch each frame at the bank: the spent dash must be replaced at the
+    # helicopter's muzzle with no inactive frame or fixed firing delay.
+    for direction in (0,1):
+        commands=fixture + object_at(2,5,76) + [
+            poke(0xbd,5),poke(sym["helicopter_types"]+2,2),
+            poke(0x9c,0x50|direction*8),
+            poke(sym["river1"],[255]*192),poke(sym["river2"],[255]*192),
+            poke(sym["river_left"],[42]*192),poke(sym["river_right"],[80]*192),
+            poke(sym["helicopter_shots"],[0]*36),
+            poke(sym["helicopter_shots"]+12,
+                 list(struct.pack("<hh2B",40 if direction else 112,76,1,direction))),
+            "press p"]
+        for frame in range(80):
+            # Hold the source away from the banks and within this block;
+            # otherwise native movement eventually blocks its muzzle.
+            commands += object_at(2,5,76) + [poke(0x9c,0x50|direction*8),
+                poke(0x8b,0),poke(0xb5,[0,2]),
+                "run 1",f'dump 0x{sym["helicopter_shots"]+12:04x} 6']
+            if frame==2:
+                commands += ["release p"]
+        _, samples=case(f"helicopter-shot-immediate-refire-{direction}",commands)
+        positions=[struct.unpack_from("<h",s)[0] for s in samples]
+        assert all(s[4]==1 for s in samples), "A bank hit left a gap before the next shot"
+        assert any(64<=x<=76 if direction else 76<=x<=88 for x in positions[:6]), \
+            "The next shot was not launched immediately at the helicopter's muzzle"
+        resets=sum((b>a if direction else b<a) for a,b in zip(positions,positions[1:]))
+        assert resets>=3, "Helicopter still waits between shots"
+
+    # Re-firing must still respect the source type and the muzzle's water.
+    for kind,x in ((0,76),(1,76),(2,112)):
+        _, states=case(f"helicopter-shot-refire-blocked-{kind}",fixture +
+            object_at(2,5 if kind else 0,x) + [
+            poke(0xbd,5),poke(sym["helicopter_types"]+2,kind),
+            poke(sym["river1"],[255]*192),poke(sym["river2"],[255]*192),
+            poke(sym["river_left"],[0 if kind==2 else 42]*192),
+            poke(sym["river_right"],[0 if kind==2 else 80]*192),
+            poke(sym["helicopter_shots"]+12,list(struct.pack("<hh2B",112,76,1,0)))] +
+            resume + [f'dump 0x{sym["helicopter_shots"]+12:04x} 6',"peek xram:0x0082 1"])
+        assert not states[0][4], "An absent/type-1 helicopter or blocked muzzle fired"
+
+    _, states=case("helicopter-type-block-scroll",fixture + object_at(2,5,76) + [
+        poke(0xbd,5),poke(sym["helicopter_types"],[0,0,2,0,0,0]),
+        poke(0x8b,31),poke(0xb5,254),poke(0xb6,2)] + resume + [
+        "dump 0xa0 6",f'dump 0x{sym["helicopter_types"]:04x} 6'])
+    assert states[0][1] in (5,6) and states[1][1]==2, "Scrolling changed the helicopter's type"
+
     def tank_at(block, x):
         return [poke(sym["tanks"]+block*5, [x,0,1,0,0])]
 
     for x, points in ((40,250),(76,750)):
         _, states = case(f"tank-score-{points}", fixture + clear_score + object_at(1,8,63) +
-            tank_at(1,x) + [poke(0xb2,43),poke(0xf5,x+3)] + resume + dump + ["dump 0xa1 1"])
+            tank_at(1,x) + [poke(0xb2,45),poke(0xf5,x+3)] + resume + dump + ["dump 0xa1 1"])
         assert score(states[0]) == points, f"Tank at {x}: score {score(states[0])}"
         assert (states[1][0]==8) == (points==250), "Tank/bridge destruction disagrees with score"
     _, states = case("tank-on-bridge-edge-hit", fixture + clear_score + object_at(1,8,63) +
@@ -733,11 +877,11 @@ def main():
         _, states = case(f"tank-bonus-life-{reserves}", fixture + [
             poke(0xcd+n*2,v) for n,v in enumerate((88,88,72,56,40,0))] +
             object_at(1,8,63) + tank_at(1,40) + [poke(0xc0,reserves),
-            poke(0xb2,43),poke(0xf5,43)] + resume + dump)
+            poke(0xb2,45),poke(0xf5,43)] + resume + dump)
         assert score(states[-1]) == 10000 and states[-1][4] == (4 if reserves==24 else 9)
     _, states = case("tank-maximum-score", fixture + [
         poke(0xcd+n*2,v) for n,v in enumerate((72,72,72,56,40,0))] +
-        object_at(1,8,63) + tank_at(1,40) + [poke(0xb2,43),poke(0xf5,43)] + resume + dump)
+        object_at(1,8,63) + tank_at(1,40) + [poke(0xb2,45),poke(0xf5,43)] + resume + dump)
     assert states[-1][16:22] == bytes([80]*6) and states[-1][2] == 2
 
     _, buffers = case("tank-driving-pause-restart", fixture + object_at(2,8,63) + [
@@ -747,7 +891,7 @@ def main():
     initial, paused_tanks, moving, restarted = buffers
     assert initial[120:130] == paused_tanks[120:130], "Tank moves while paused"
     x0,y0,image0,_,_,_ = struct.unpack_from("<hhHHBB",initial,120)
-    assert image0==0x9d80 and y0==85
+    assert image0 in (0x9d80,0xbf00) and y0==93
     assert struct.unpack_from("<h",moving,120)[0] != x0, "Tank does not drive"
     assert all(struct.unpack_from("<h",restarted,(10+n)*10+2)[0]==-256 for n in range(6)), \
         "Restart retained road tanks"
@@ -757,7 +901,266 @@ def main():
         "dump 0xa0 6",f'dump 0x{sym["tanks"]:04x} 30',"dump xram:0x0300 160"])
     ids, tanks, sprites = buffers
     assert ids[1]==8 and tanks[5+2]==1 and 54<=struct.unpack_from("<h",tanks,5)[0]<=58
-    assert struct.unpack_from("<H",sprites,110+4)[0]==0x9d80
+    assert struct.unpack_from("<H",sprites,110+4)[0] in (0x9d80,0xbf00)
+
+    # Shoreline tanks are independent of bridge tanks. A controlled 40..120
+    # corridor lets both banks and the safe-round / dangerous-splash rule be
+    # exercised against the actual native jet and missile bitmaps.
+    bank_fixture = fixture + [poke(0xbd,7),
+        poke(sym["bank_tanks"],[0]*26),
+        poke(sym["river1"],[0xfc]*192),
+        poke(sym["river_left"],[40]*192),poke(sym["river_right"],[80]*192),
+        poke(sym["player_outer_left"],[40]*192),
+        poke(sym["player_outer_right"],[120]*192),
+        poke(sym["player_island_left"],[0]*192),
+        poke(sym["player_island_right"],[0]*192)]
+
+    def bank_at(x=0, y=40, side=0, phase=0, shot_x=0, target=0, timer=0):
+        return [poke(sym["bank_tanks"],list(struct.pack("<hhh7B",
+            x,y,shot_x,side,1,90 if phase else 0,phase,target,timer,0)))]
+
+    # Both 9x9 drawings are packed into 12x16 storage. Padding must remain
+    # transparent, mirrored storage must not move the visible tank, and the
+    # ninth column must collide in both directions.
+    _, buffers=case("bank-tank-wider-bitmaps",bank_fixture + bank_at(x=29) + [
+        poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",122,80,0,1,1,90,0,0,0,122))),
+        "run 3","dump xram:0x9d80 96","dump xram:0xbf00 96",
+        "dump xram:0x03a0 40"])
+    a,b,descriptors=buffers
+    assert a[:36]==b[:36] and a[54:]==b[54:], "Track animation changes the body"
+    assert a[36:54]!=b[36:54], "Track animation frames are identical"
+    assert all((p>>shift)&15 in (0,1) for p in a+b for shift in (0,4)), "Tank has non-black ink"
+    for image in (a,b):
+        lit=[(x,y) for y in range(16) for x in range(12)
+            if (image[y*6+x//2]>>(0 if x&1 else 4))&15]
+        assert max(x for x,y in lit)==8 and max(y for x,y in lit)==8
+    for slot,side in ((0,0),(2,1)):
+        sx,sy,_,_,size,options=struct.unpack_from("<hhHHBB",descriptors,slot*10)
+        assert size==0x32 and bool(options&16)==bool(side)
+        assert sx==(119 if side else 29)*2 and sy==21+(80 if side else 40)+8
+    for side in (0,1):
+        for column,hits in ((8,True),(9,False)):
+            x=122 if side else 29
+            _, states=case(f"bank-tank-ninth-column-{side}-{column}",
+                bank_fixture + clear_score + bank_at(x=x,y=96,side=side) + [
+                "press f5","run 2","release f5","run 2",
+                poke(0xb2,45),poke(0xf5,x+column)] + resume + dump + [
+                f'dump 0x{sym["bank_tanks"]:04x} 13'])
+            assert score(states[0])==(250 if hits else 0), "Ninth-column hit differs from drawing"
+            assert (states[1][7]==2)==hits
+
+    # Repeated independent shots must vary, and the whole largest explosion
+    # must fit in actual water across bends and on either side of an island.
+    for shape in ("straight","bend","island","island-bend","narrow","closed"):
+        left=[40]*192; right=[80]*192
+        if shape.startswith("island"):
+            left=[20]*192; right=[60]*192
+        if "bend" in shape:
+            for y in range(41,57):
+                left[y]+=y-41
+                if shape.startswith("island"):
+                    right[y]-=(y-41)//2
+        if shape=="narrow":
+            right=[44]*192
+        if shape=="closed":
+            right=[40]*192
+        for side in (0,1):
+            commands=bank_fixture + [poke(sym["ring_top"],0),
+                poke(sym["river_left"],left),poke(sym["river_right"],right)]
+            for attempt in range(12):
+                # Keep the terrain stationary during six active frames.
+                commands+=bank_at(x=122 if side else 30,side=side) + [
+                    poke(0xb5,0),poke(0x8c,0)] + resume + [
+                    f'dump 0x{sym["bank_tanks"]:04x} 13',
+                    "press p","run 3","release p","run 3"]
+            _, samples=case(f"bank-random-range-{shape}-{side}",commands)
+            targets=set()
+            for state in samples:
+                if shape in ("narrow","closed"):
+                    assert state[9]==0, "Tank fired without room for its explosion"
+                    continue
+                assert state[9] in (1,2), "Tank did not fire into available water"
+                assert struct.unpack_from("<h",state,2)[0]==40, "Fixture scrolled"
+                target=state[10]; targets.add(target)
+                for y in range(41,57):
+                    for x in range(target,target+8):
+                        mx=x if x<80 else 159-x
+                        assert left[y]<=mx<right[y], \
+                            f"Tank aimed outside water at {x},{y} ({shape}, side {side})"
+                        if right[y]<80:
+                            assert (x>=80)==bool(side), "Tank shot across an island"
+            if shape not in ("narrow","closed"):
+                assert len(targets)>=5, f"Tank range does not vary: {targets}"
+
+    for side in (0,1):
+        _, buffers = case(f"bank-tank-approach-{side}", bank_fixture +
+            bank_at(x=160 if side else -8,side=side) + resume + [
+            "run 90",f'dump 0x{sym["bank_tanks"]:04x} 13',
+            "dump xram:0x03a0 20"])
+        tank_state, descriptors = buffers
+        assert struct.unpack_from("<h",tank_state)[0] == (122 if side else 29)
+        assert tank_state[7]==1 and tank_state[9] in (1,2), "Tank did not fire at water"
+        assert struct.unpack_from("<H",descriptors,4)[0] in (0x9d80,0xbf00)
+        assert struct.unpack_from("<H",descriptors,14)[0] in (0xbe00,0xbe30,0xbe70,0xbeb0)
+        if tank_state[9]==1:
+            y=struct.unpack_from("<h",tank_state,2)[0]
+            assert struct.unpack_from("<h",descriptors,12)[0]+1==21+y+9, \
+                "Tank round is not aligned with its barrel"
+
+    case("bank-round-crosses-jet-safely", bank_fixture +
+        bank_at(x=30,y=134,phase=1,shot_x=76,target=110) + resume + [
+        "peek xram:0x0082 1"])
+    case("bank-splash-crashes-jet", bank_fixture +
+        bank_at(x=30,y=134,phase=2,shot_x=76,target=76,timer=18) + resume + [
+        "peek xram:0x0082 2"])
+    # Native death freezes extension ticks. Every enemy projectile must be
+    # hidden immediately, whether death came from a splash or from the bank.
+    for cause in ("splash","ground"):
+        commands=bank_fixture + bank_at(x=29,y=134,phase=2,
+            shot_x=76 if cause=="splash" else 45,target=76 if cause=="splash" else 45,timer=6) + [
+            poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",122,40,55,1,1,90,2,55,6,122))),
+            poke(sym["helicopter_shots"],list(struct.pack("<hh2B",60,80,1,0))),
+            "run 3","dump xram:0x03a0 40"]
+        if cause=="ground":
+            commands += [poke(0xb3,4)]
+        _, states=case(f"bank-splash-cleared-on-death-{cause}",commands + resume + [
+            "peek xram:0x0082 2",f'dump 0x{sym["bank_tanks"]:04x} 26',
+            f'dump 0x{sym["helicopter_shots"]:04x} 36',"dump xram:0x03a0 40",
+            "run 20","dump xram:0x03a0 40"])
+        visible,tanks,shots,dead,later=states
+        assert all(struct.unpack_from("<h",visible,i*10+2)[0]!=-256 for i in (1,3))
+        assert tanks[9]==tanks[22]==0 and shots==bytes(36)
+        assert all(struct.unpack_from("<h",data,i*10+2)[0]==-256
+            for data in (dead,later) for i in (1,3)), "Frozen impact circle survives the player's death"
+
+    # After the last life, the native river resumes scrolling in attract
+    # mode. Bank tanks follow that river without approaching or firing.
+    for side in (0,1):
+        snapshot=[f'dump 0x{sym["bank_tanks"]:04x} 26',
+                  "dump xram:0x0200 16","dump xram:0x03a0 40"]
+        _, samples=case(f"bank-tank-last-life-scroll-{side}",bank_fixture +
+            bank_at(x=122 if side else 29,y=40,side=side) + [
+            poke(0xc0,sym["rr_Copyright0"]&255),poke(0xb3,4)] + resume + [
+            "peek xram:0x0082 2",f'wait 0x{sym["ready"]:04x} 2 240',
+            "run 3"] + snapshot + ["run 60"] + snapshot + [
+            "press p","run 3","release p","run 3"] + snapshot + [
+            "run 60"] + snapshot + [
+            "press p","run 3","release p","run 3","run 600"] + snapshot)
+        before,config0,sprites0,after,config1,sprites1,paused0,_,_,paused1,_,_,gone,_,hidden=samples
+        delta=(struct.unpack_from("<h",config1,4)[0]-
+               struct.unpack_from("<h",config0,4)[0])%192
+        assert 0<delta<80, "Game-over scenery did not scroll"
+        assert struct.unpack_from("<h",sprites1,2)[0]-struct.unpack_from("<h",sprites0,2)[0]==delta, \
+            "Bank tank stopped following scenery after the last life"
+        assert before[:2]==after[:2] and not before[9] and not after[9], \
+            "Attract-mode tank approached or fired"
+        assert paused0==paused1, "Attract-mode bank tank moves during pause"
+        assert gone==bytes(26), "Off-screen tank was retained or a new tank spawned in attract mode"
+        assert all(struct.unpack_from("<h",hidden,i*10+2)[0]==-256 for i in range(4))
+
+    # Check all six visible/clear phases, filled pixels and actual white ink.
+    circle_commands=bank_fixture + bank_at(x=30,y=40,phase=2,shot_x=60,target=60,timer=18)
+    for timer in (18,15,12,9,6,3):
+        circle_commands += [poke(sym["bank_tanks"]+11,timer),"run 3",
+            "dump xram:0x03aa 10",f'shot "{(output / f"tank-circle-{timer}.png").as_posix()}"']
+    _, circle_buffers = case("bank-splash-white-circles", circle_commands + [
+        "dump xram:0xbe30 192","dump xram:0xbf80 4"])
+    circle_images=circle_buffers[-2]
+    assert circle_buffers[-1]==bytes([0,0,255,255]), "Impact circles are not white"
+    diameters=[]
+    for phase,descriptor in enumerate(circle_buffers[:6]):
+        if phase&1:
+            assert struct.unpack_from("<h",descriptor,2)[0]==-256, "Circle was not erased"
+            continue
+        stage=phase//2
+        assert struct.unpack_from("<H",descriptor,4)[0]==0xbe30+stage*64
+        assert struct.unpack_from("<H",descriptor,6)[0]==0xbf80
+        assert descriptor[8]==0x31
+        pixels=circle_images[stage*64:(stage+1)*64]
+        lit=[(x,y) for y in range(16) for x in range(8)
+             if (pixels[y*4+x//2]>>(0 if x&1 else 4))&15]
+        diameters.append(max(y for x,y in lit)-min(y for x,y in lit)+1)
+        assert pixels[7*4+1]&15, "Circle has a transparent centre"
+        for y in {y for x,y in lit}:
+            xs=[x for x,py in lit if py==y]
+            assert len(xs)==max(xs)-min(xs)+1, "Circle is not filled"
+    assert diameters==[4,8,16], f"Wrong splash diameters: {diameters}"
+    case("bank-cleared-circle-safe-for-jet", bank_fixture +
+        bank_at(x=30,y=134,phase=2,shot_x=76,target=76,timer=3) + resume + [
+        "peek xram:0x0082 1"])
+
+    # The tank's round consumes fuel without awarding the player's 80 points
+    # or consuming a player missile. A shot through transparent padding misses.
+    for tank_y, destroys in ((96,True),(71,False)):
+        _, buffers = case(f"bank-round-fuel-{tank_y}", bank_fixture + clear_score +
+            object_at(1,10,56) + bank_at(x=30,y=tank_y,phase=1,shot_x=58,target=110) +
+            [poke(0xb2,0),poke(0xf5,110)] + resume + dump + ["dump 0xa1 1"])
+        assert score(buffers[0])==0, "Enemy fire awarded points to the player"
+        assert (buffers[1][0]!=10)==destroys, "Tank round / FUEL bitmap collision disagrees"
+        assert buffers[0][8], "Enemy fire consumed the player's missile"
+
+    _, buffers = case("bank-round-fuel-at-impact", bank_fixture + clear_score +
+        object_at(1,10,94) + bank_at(x=30,y=96,phase=1,shot_x=88,target=90) +
+        resume + dump + ["dump 0xa1 1"])
+    assert score(buffers[0])==0 and buffers[1][0]!=10, \
+        "A round touching FUEL at its water impact must destroy the depot"
+    _, buffers = case("bank-splash-expires", bank_fixture +
+        bank_at(x=30,y=134,phase=2,shot_x=45,target=45,timer=18) + resume + [
+        "run 14",f'dump 0x{sym["bank_tanks"]:04x} 13',"peek xram:0x0082 1"])
+    assert buffers[-1][9]==0, "Expired splash remains dangerous"
+
+    _, buffers = case("bank-tank-score", bank_fixture + clear_score +
+        bank_at(x=44,y=96) + [poke(0xb2,45),poke(0xf5,47)] + resume + dump + [
+        f'dump 0x{sym["bank_tanks"]:04x} 13'])
+    assert score(buffers[0])==250 and buffers[1][7]==2, "Bank tank hit did not award 250"
+
+    _, buffers = case("bank-tank-pause-restart", bank_fixture + bank_at() + [
+        "run 4",f'dump 0x{sym["bank_tanks"]:04x} 26',
+        "run 60",f'dump 0x{sym["bank_tanks"]:04x} 26'] + resume + [
+        "press r","run 4","release r","run 4",
+        f'dump 0x{sym["bank_tanks"]:04x} 26',"dump xram:0x03a0 40"])
+    assert buffers[0]==buffers[1], "Bank tank or its projectile moves during pause"
+    assert buffers[2]==bytes(26), "Restart retained shoreline tanks"
+    assert all(struct.unpack_from("<h",buffers[3],i*10+2)[0]==-256 for i in range(4))
+
+    _, buffers = case("bank-tanks-on-rendered-banks", fixture + [poke(0xbd,7),
+        poke(sym["bank_tanks"],[0]*26)] + bank_at(x=-8,y=20) + [
+        poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",160,0,0,1,1,0,0,0,0,0)))] +
+        resume + ["run 110", "dump xram:0x03a0 40", "dump xram:0x0200 16",
+        "dump xram:0x0800 7680", "dump xram:0x2700 3136", "dump xram:0x9d80 96",
+        f'shot "{(output / "bank-tanks.png").as_posix()}"'])
+    sprites, config, terrain, tiles, image = buffers
+    origin_y=struct.unpack_from("<h",config,4)[0]
+    for sprite in (0,2):
+        sx,sy,address,_,_,options=struct.unpack_from("<hhHHBB",sprites,sprite*10)
+        assert address in (0x9d80,0xbf00) and sy!=-256, "Bank tank is not visible"
+        for y in range(16):
+            if not 21<=sy+y<181:
+                continue
+            row_index=(sy+y-origin_y)%192
+            for x in range(12):
+                ix=11-x if options&16 else x
+                if not (image[y*6+ix//2]>>(0 if ix&1 else 4))&15:
+                    continue
+                for px in range(sx//2+x-2,sx//2+x+3):
+                    assert 0<=px<160, "Tank did not finish approaching the bank"
+                    tile=terrain[row_index*40+px//4]
+                    color=tiles[tile*32+px%4]&15
+                    assert color not in (1,12), "Tank touches water or decorative bank"
+
+    for level in (6,7):
+        _, buffers = case(f"bank-tank-spawn-level-{level}", bank_fixture + [
+            poke(sym["bank_tanks"],[0]*26),poke(0xbd,level),poke(0x8b,31),
+            poke(0xb5,254),poke(0xb6,2)] + resume + [
+            f'dump 0x{sym["bank_tanks"]:04x} 26'])
+        assert bool(buffers[-1][7]) == (level>=7), "Shore tanks must start at bridge 7"
+
+    # Scrolling with two tanks and firing exercises the extra sprites and
+    # bank sampling inside the shipping Release frame budget.
+    case("bank-tanks-frame-budget", bank_fixture + bank_at(x=30) + [
+        poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",122,110,0,1,1,0,0,0,0,0))),
+        poke(0xb5,254),poke(0xb6,2)] + resume + [
+        "press lctrl","run 1200","release lctrl"])
 
     # Native procedural generation supplies balloons without test-only rules.
     _, buffers = case("balloon-generator", fixture + [poke(0xbd,2),poke(0x8b,31),

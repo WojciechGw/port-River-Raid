@@ -20,7 +20,20 @@ The graphics combine original bitmaps with a palette and scenery inspired
 by Atari XL and 5200 screenshots: smooth brown banks of varying width,
 two mountain variants (blue slopes or black ridges), and dark blue water.
 The added balloons have multicolored envelopes and baskets, while tanks
-drive along the roads across bridges. The panel shows the score, fuel,
+drive along the roads across bridges. From bridge 7, additional tanks
+approach the river from either side and fire from the banks at random distances.
+The entire largest impact circle stays within the water; tanks facing an
+island fire into their own channel. Both tank types
+have animated tracks, running at half the helicopter animation cadence. Tank rounds in flight
+do not harm the plane; their growing white filled circles on the water do.
+The reference tank silhouette has a distinct barrel and separated black wheels.
+Two helicopter variants share animated salmon rotors. From level 5, one in
+four new helicopters has an olive fuselage stripe and fires pale horizontal
+shots that can hit the player's plane. Its shots disappear at the riverbank
+or an island.
+Each small, medium, and large impact circle is erased before the next phase.
+Tank rounds can also destroy FUEL depots, without awarding player points.
+The panel shows the score, fuel,
 player, game variation, bridge number, session high score (HI), and reserve
 planes. Sound maps the TIA registers to the PSG.
 RGB555 colors and noise remain approximations. Compatibility and limitations
@@ -64,7 +77,7 @@ unsupported by the port's code. The BASIC branch remains a template example.
 Two gamepads are supported: the D-pad or left stick controls movement, the
 four face buttons fire, Start pauses, and Select starts a new game. Flying
 over a fuel tank refuels the plane; shooting the tank awards points.
-A balloon awards 60 points, a tank on the road 250, a bridge 500,
+A balloon awards 60 points, a tank on the road or bank 250, a bridge 500,
 and a bridge with a tank 750. Scrolling into the next section increases the level.
 In two-player games, players switch after losing a plane.
 
