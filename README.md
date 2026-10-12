@@ -4,9 +4,9 @@
 preset: cc65/Release
 publish: riverraid.zip
 -->
-[![Play River Raid](https://wojciechgw.github.io/port-river-raid/port-river-raid/screenshot.png)](https://wojciechgw.github.io/port-river-raid/port-river-raid/)
+[![Play River Raid](https://wojciechgw.github.io/port-river-raid/port-river-raid/screenshot.png)](https://wojciechgw.github.io/port-River-Raid/riverraid/)
 
-[Play it in your browser](https://wojciechgw.github.io/port-river-raid/port-river-raid/).
+[Play it in your browser](https://wojciechgw.github.io/port-River-Raid/riverraid/).
 
 
 A River Raid port for Picocomputer 6502 that runs the original game logic natively.
