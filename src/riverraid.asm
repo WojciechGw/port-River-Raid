@@ -19,7 +19,7 @@
 .export _tia_color
 .import _tia_palette
 .export _demo_tick
-.import _ready, _demo_wait
+.import _ready
 .export _present_frame
 .import _terrain, _sprites, _footer_offset
 .segment "CODE"
@@ -63,14 +63,9 @@ _present_frame:
     sta RIA_RW0
     rts
 
-; A = elapsed 60 Hz VSYNCs, including missed frames. Called after input,
-; before native rules and footer rendering, so both start on the same frame.
-; ready: 1 waits 180 VSYNCs, 2 runs attract mode, 0 is the user game.
+; Called after input, before native rules and footer rendering. The startup
+; fade has finished; start the caption and demo together, without a delay.
 _demo_tick:
-    tax
-    lda _ready
-    cmp #1
-    beq @waiting
     lda $282
     lsr a
     bcc @done                 ; A user reset takes precedence over attract.
@@ -78,21 +73,12 @@ _demo_tick:
     cmp #$ff
     bne @done                 ; Return to attract after game over / F2.
     beq @activate
-@waiting:
-    txa
-    cmp _demo_wait
-    bcs @activate
-    eor #$ff
-    sec
-    adc _demo_wait            ; Saturating wait -= elapsed VSYNCs.
-    sta _demo_wait
 @done:
     rts
 @activate:
     lda #2
     sta _ready
     lda #0
-    sta _demo_wait
     sta $c6                   ; Native running mode: move enemies/terrain.
     lda #64
     sta $b5                   ; Normal river speed, without player rules.

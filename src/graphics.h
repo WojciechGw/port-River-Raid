@@ -34,18 +34,46 @@ static const uint8_t activision_color_roles[6]={0x66,0x0c,0x24,0x1a,0xb6,0x84};
 /* Atari 5200 references: original/Atari 5200/s_RiverRaid_*.png.
  * RGB555 samples of the flat, lossless PNG colors. The first byte is the
  * original TIA color role, so B&W and the original screensaver still work.
- * Terrain tones are adjusted for darker land and brighter blue water. */
+ * Terrain tones are adjusted for darker land and brighter blue water;
+ * ship and helicopter greens are tuned for their respective sprites. */
 static const uint8_t reference_colors[][4] = {
     {0x00,0,0,0}, {0x04,7,7,7}, {0x06,11,11,11}, {0x08,15,15,15},
     {0x0c,22,22,22}, {0x10,9,9,0}, {0x12,13,13,2}, {0x14,17,16,4},
     {0x18,23,23,7}, {0x1c,31,28,16}, {0x1e,31,28,16},
     {0x20,9,0,0}, {0x2a,29,25,13}, {0x32,13,0,0}, {0x38,31,18,13}, {0x48,23,6,15},
     {0x80,0,4,16}, {0x84,1,9,23}, {0x8c,15,21,30}, {0x9c,16,24,29},
-    {0xa8,5,20,19}, {0xac,16,27,29}, {0xb0,0,9,0},
+    {0xa8,5,20,19}, {0xac,16,27,29}, {0xb0,0,7,0}, {0xba,12,26,10},
     {0xd2,1,9,0}, {0xd6,6,14,2}, {0xda,19,25,12},
     {0xd8,21,25,8}, {0xc8,13,28,14}, {0xb8,10,27,18}, {0xa6,9,24,22},
     {0x96,9,20,26}, {0x86,16,12,28}, {0x76,20,10,27}, {0x56,27,10,19},
-    {0x46,28,13,15}, {0x36,24,13,7}, {0x26,22,18,5}, {0x22,13,2,0}
+    {0x46,28,13,15}, {0x36,24,13,7}, {0x26,22,18,5}, {0x22,13,2,0},
+    {0x24,10,6,0}, {0x28,14,10,0}, {0x2e,21,17,5} /* 5200 bridge beams */
+};
+
+/* 5200 bridge, top to bottom, at block rows 8..24. Each digit fills all
+ * eight native columns (48 logical pixels); 5 draws only ..5..5.. supports.
+ * 1 = red-brown rim, 2 = dark beam, 3 = light beam, 4 = gold stripe,
+ * 5 = black support. Beam profile sampled from s_RiverRaid_2.png,
+ * x=260..387, y=70..103; widen to cover the port's river and both banks. */
+#pragma rodata-name(push, "SPLASH")
+static const uint8_t bridge_rows[17]={
+    1,       /* 11111111 */
+    2,       /* 22222222 */
+    3,3,     /* 33333333 */
+    2,2,     /* 22222222 */
+    4,4,     /* 44444444 */
+    3,3,     /* 33333333 */
+    2,2,     /* 22222222 */
+    3,3,     /* 33333333 */
+    1,       /* 11111111 */
+    5,5      /* ..5..5.. */
+};
+static const uint8_t bridge_colors[6]={0,0x22,0x24,0x28,0x2e,0x00};
+#pragma rodata-name(pop)
+/* Twenty approach-road rows, starting at block row 6. 4 = dark edge,
+ * 7 = upper gray, 6 = pale center line, 5 = lower gray. */
+static const uint8_t bridge_road[20]={
+    4,4,4,7,7,7,7,7,6,6,5,5,5,5,5,5,4,4,4,4
 };
 
 /* 5200 balloon: . = transparent, 1..D = indices into balloon_colors.
@@ -53,13 +81,7 @@ static const uint8_t reference_colors[][4] = {
 static const uint8_t balloon_colors[14]={
     0,0x2a,0xd8,0xc8,0xb8,0xa6,0x96,0x86,0x76,0x56,0x46,0x36,0x26,0x22
 };
-static const char balloon_pixels[32][9]={
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
+static const char balloon_pixels[20][9]={
     "..1111..",
     ".222222.",
     ".333333.",
@@ -79,23 +101,35 @@ static const char balloon_pixels[32][9]={
     "..D..D..",
     "...DD...",
     "...DD...",
-    "...DD...",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........",
-    "........"
+    "...DD..."
 };
 /* Reference tank: 1 = opaque black, . = transparent wheel gaps. */
 static const uint8_t tank_colors[3]={0,0x00,0x08};
-/* Tank rounds fly horizontally; white impact circles damage the jet.
- * 7 = black shell, E = pale yellow tank destruction flash (terrain palette). */
+/* Native ship, top to bottom at block rows 16..23. X = opaque,
+ * . = transparent. Each column is doubled horizontally by the renderer.
+ * Preserve the native palette slots used by the two-row color bands. */
 #pragma rodata-name(push, "SPLASH")
-static const char tank_shell_pixels[4][9]={
+static const char ship_pixels[8][9]={
+    "...X....",
+    "...X....",
+    "..XX....",
+    ".XXXX...",
+    "XXXXXXXX",
+    "XXXXXXX.",
+    "XXXXXX..",
+    ".XXXXX.."
+};
+static const uint8_t ship_colors[16]={
+    0,0x2a,0xac,0x9c,0x8c,0xba,0x32,0x00,
+    0x00,0x20,0x14,0x12,0x14,0x12,0x00,0x00
+};
+#pragma rodata-name(pop)
+/* Tank rounds fly horizontally; white impact circles damage the jet.
+ * W = white shell (impact palette), E = pale yellow destruction flash. */
+#pragma rodata-name(push, "SPLASH")
+static const char tank_shell_pixels[3][9]={
     "........",
-    "..7777..",
-    "..7777..",
+    "..WWWW..",
     "........"
 };
 static const char tank_blast_pixels[8][9]={
@@ -108,36 +142,30 @@ static const char tank_blast_pixels[8][9]={
     ".E.EE.E.",
     "...EE..."
 };
-/* Second track frame, drawing rows 6..8. Black wheels change position. */
-static const char tank_tracks_alt[3][10]={
-    "1.1.1.1.1",
-    ".........",
-    "1.1.1.1.1"
-};
 /* Reference helicopters facing right. B = black tail, G = dark green,
  * R = salmon rotor, D = dark blue fuselage stripe. In the firing variant
  * B and D use olive instead. IDs 5/6 still select the two rotor frames. */
 static const uint8_t helicopter_colors[6]={0,0x00,0xb0,0x38,0x80,0x14};
 static const char helicopter_pixels[2][9][9]={
     {
-        "...RRRRR",
-        ".....R..",
+        ".....RRR",
+        "...RRR..",
         ".....R..",
         "....GGG.",
-        "B..GGGGG",
-        "DDDDDDDD",
-        "B...GGG.",
+        "G..GGGGG",
+        "GDDDDDDD",
+        "G...GGG.",
         ".....G..",
         "....GGG."
     },
     {
-        "........",
-        "...RRRRR",
+        "...RRR..",
+        ".....RRR",
         ".....R..",
         "....GGG.",
-        "B..GGGGG",
+        "G..GGGGG",
         "DDDDDDDD",
-        "B...GGG.",
+        "G...GGG.",
         ".....G..",
         "....GGG."
     }
@@ -205,25 +233,42 @@ static const char tank_circle_pixels[3][16][9]={
  * drawing, positioned eight rows below the native block origin.
  * Sprite storage is padded to 12x16 by prepare_tank_animation(). */
 static const char tank_pixels[9][10]={
-    "...11....",
-    "...111111",
-    "...11....",
-    ".1111111.",
+    "..1111...",
+    "..1111111",
+    "...111...",
+    "11111111.",
     "111111111",
     "111111111",
     ".1.1.1.1.",
-    ".........",
+    "1.......1",
     ".1.1.1.1."
+};
+/* Two extra track frames, drawing rows 6..8. The third phase adds
+ * offset links through the middle row to make the rolling motion clearer. */
+static const char tank_tracks_alt[2][3][10]={
+    {
+        "..1.1.1..",
+        "........1",
+        "..1.1.1.."
+    },
+    {
+        "..1.1.1..",
+        "1........",
+        "..1.1.1.."
+    }
 };
 
 /* Mountain silhouettes sampled from original/Atari XL/image0.png.
  * Variant 0: three brown peaks and blue far slopes.
  * Variant 1: lower double peak with black ridges.
  * Variant 2: a single medium peak with a black ridge.
+ * Variant 3: three stepped peaks with blue cuts, from the supplied reference.
+ * Variant 4: overlapping wide peaks with a blue crest and black ridges.
  * One character = one logical pixel (two canvas pixels).
  * Stored rows are sprite Y=7..27; the other rows are transparent.
  * . = transparent, B = brown, K = black, U = blue. */
-static const char mountain_pixels[3][21][32] = {
+#define MOUNTAIN_VARIANTS 5
+static const char mountain_pixels[MOUNTAIN_VARIANTS][21][32] = {
     {
         ".......................U........",
         ".....................BBU........",
@@ -241,11 +286,11 @@ static const char mountain_pixels[3][21][32] = {
         "..BBBBUUBBBBBBBUUBBBBBBBUUUUUU..",
         "..BBBBBUUBBBBBBBUUBBBBBBUUUUUU..",
         "..BBBBBUUBBBBBBBUUUBBBBBUUUUUU..",
-        ".BBBBBBBBBBBBBBBUUUBBBBBBUUU....",
-        "BBBBBBBBBBBBBBBBBUUBBBBBBUU.....",
-        "BBBBBBBBBBBBBBBBBUUBBBBBBUU.....",
-        "BBBBBBBBBBBBBBBBBUUUBBBBBU......",
-        ".BBB....BBBBBB..................",
+        ".BBBBBBBBBBBBBBBUUUBBBBBBUUUU...",
+        "BBBBBBBBBBBBBBBBBUUBBBBBBUUUU...",
+        "BBBBBBBBBBBBBBBBBUUBBBBBBUUUUU..",
+        "BBBBBBBBBBBBBBBBBUUUBBBBBUUUUUU.",
+        "................................",
     },
     {
         "................................",
@@ -265,8 +310,8 @@ static const char mountain_pixels[3][21][32] = {
         "...BBBBKKBKKKBBBBBKKK...........",
         "..BBBBBKBBBKKBBBBBKKK...........",
         "..BBBBBBBBBBKKBBBBKKKK..........",
-        "..BBBBBBBBBBBKBBBBBKKK..........",
-        "BBBBBBBBBBBBBBBBBBBKKK..........",
+        "..BBBBBBBBBBBKBBBBBKKKK.........",
+        "BBBBBBBBBBBBBBBBBBBKKKKK........",
         "................................",
         "................................",
     },
@@ -292,6 +337,52 @@ static const char mountain_pixels[3][21][32] = {
         "...BBBBBBBBBBBBBBBBBBBBKKKKK....",
         "....BBBBBBBBBBBBBBBBBBBBKKKK....",
         "................................"
+    },
+    {
+        ".................B..............",
+        ".................B..............",
+        ".................B..............",
+        ".................B..............",
+        "................BBB...B.........",
+        "................BBB...B.........",
+        "..........B.....BBB...B.........",
+        "..........B.....BBB...B.........",
+        ".........BBB...BBBB..BB.........",
+        ".........BBB...BBBB..BB.........",
+        ".........BBBB.BBBBBBUBBB........",
+        ".........BBBB.BBBBBBUBBB........",
+        "........BBBBBUBBBBBUBBBB........",
+        "........BBBBBUBBBBBUBBBB........",
+        "........BBBBUUBBBBUBBBBB........",
+        "........BBBBUUBBBBUBBBBB........",
+        ".......BBBBUBBBBBUBBBBBBB.......",
+        ".......BBBBUBBBBBUBBBBBBB.......",
+        "......BBBBBUBBBBUBBBBBBBBB......",
+        "......BBBBBUBBBBUBBBBBBBBB......",
+        "................................",
+    },
+    {
+        "...............UK...............",
+        "..............UBKK..............",
+        ".............UBBBKK.....K.......",
+        "............UBBBBKK....BKK......",
+        "...........UBBBBBBKK..BBBKK.....",
+        "..........UBBBBBBBBKBBBBBBKK....",
+        ".........UBBBBBBBBBKKBBBBBBKK...",
+        ".......UUBBBBBBBBBBKKKBBBBBBKK..",
+        "......BBBBBBBBBBBBBKKBKBBBBBBKK.",
+        ".....BBBBBBBBBBBBBKKBBBKBBBBBBKK",
+        "....BBBBBBBBBBBBKKKBBBBBKBBBBBBK",
+        "...BBBBBBBBBBBBBBBBBBBBBBKBBBBBB",
+        "..BBBBBBBBBBBBBBBBBBKBBBBBKKKKKK",
+        "..BBBBBBBBBBBBBBBBBBBKK.........",
+        ".BBBBBBBBBBBBBBBBBBBBBKK........",
+        ".BBBBBBBBBBBBBBBBBBBBBBKK.......",
+        "BBBBBBBBBBBBBBBBBBBBBBBBKK......",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBB......",
+        "BBBBBBBBBBBBBBBBBBBBBBBBBBB.....",
+        "......BBBBBB.....BBBBB..........",
+        "................................",
     },
 };
 /* Inward cuts in native land, in logical pixels. The shallow, irregular
@@ -392,19 +483,19 @@ static const char bridge_label[6][29] = {
 /* Fuel frame, E, F and 1/2, reconstructed from unobscured reference pixels. */
 static const char fuel_gauge[16][40] = {
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-    "X..XX..............X..............XX..X",
-    "X..XX..............X..............XX..X",
-    "X..XX...........X..X..............XX..X",
-    "X..XX..........XX.................XX..X",
+    "X.XX...............X...............XX.X",
+    "X.XX...............X...............XX.X",
+    "X.XX............X..................XX.X",
+    "X.XX...........XX..................XX.X",
     "X...............X....XX...............X",
     "X...............X...XX................X",
-    "X..XXXX........XXX.XX..........XXXX...X",
-    "X..X..............XX...........X......X",
-    "X..X.............XX.XXX........X......X",
-    "X..XXX..........XX....X........XXX....X",
-    "X..X...........XX...XXX........X......X",
-    "X..X................X..........X......X",
-    "X..XXXX.............XXX........X......X",
+    "X.XXXXX........XXX.XX...........XXXXX.X",
+    "X.X...............XX............X.....X",
+    "X.X..............XX.XXX.........X.....X",
+    "X.XXXX..........XX....X.........XXXX..X",
+    "X.X............XX...XXX.........X.....X",
+    "X.X.................X...........X.....X",
+    "X.XXXXX.............XXX.........X.....X",
     "X.....................................X",
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 };

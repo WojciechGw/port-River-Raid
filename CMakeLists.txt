@@ -43,7 +43,7 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/cover.asm src/main.c ${RIVER_CORE}
+        src/riverraid.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm ${RIVER_CORE}
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS

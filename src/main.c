@@ -2,6 +2,7 @@
 #include <string.h>
 #include "xram.h"
 #include "graphics.h"
+#include "audio.h"
 #include "demo_footer.h"
 
 _Static_assert(XRAM_DEMO_FOOTER_IMAGE + DEMO_FOOTER_BYTES <= XRAM_MEDIUM_MOUNTAIN, "Demo footer overlaps mountain");
@@ -49,9 +50,11 @@ void rr_init(void);
 void rr_step(void);
 void rr_tank_bonus(void);
 void rr_tank_crash(void);
-void __fastcall__ demo_tick(uint8_t vsyncs);
+void demo_tick(void);
 void present_frame(void);
 void show_cover(void);
+void game_fade_prepare(void);
+void game_fade_in(void);
 void __fastcall__ write_terrain_row(unsigned address);
 void __fastcall__ write_jet_image(unsigned native_address);
 void __fastcall__ write_hud_span(unsigned address);
@@ -83,7 +86,6 @@ uint16_t footer_offset;
 static uint8_t shown_demo=255;
 sprite_t sprites[SPRITE_COUNT];
 static sprite_t hud_sprites[HUD_SPRITE_COUNT];
-static oscillator_t sound[8];
 static uint8_t masks[OBJECT_IMAGE_COUNT][32], sprite_colors[OBJECT_IMAGE_COUNT][16];
 static uint8_t widths[OBJECT_IMAGE_COUNT], scales[OBJECT_IMAGE_COUNT];
 static uint8_t reverse_bits[256];
@@ -117,6 +119,10 @@ typedef struct {
     uint8_t pattern1, pattern2, flags, flip, valid;
 } mountain_position_t;
 static mountain_position_t mountain_positions[6];
+static const uint16_t mountain_images[MOUNTAIN_VARIANTS]={
+    XRAM_IMAGES+9*IMAGE_BYTES,XRAM_SMALL_MOUNTAIN,XRAM_MEDIUM_MOUNTAIN,
+    XRAM_STEPPED_MOUNTAIN,XRAM_WIDE_MOUNTAIN
+};
 static uint8_t mountain_min_x=32, mountain_max_x;
 uint8_t collision_mask, collision_scale;
 uint8_t river1[RIVER_RING], river2[RIVER_RING], ring_top;
@@ -132,18 +138,18 @@ static uint8_t edge_left[96], edge_right[96], edge_valid[96];
 static uint8_t shore_left, shore_right, shore_outer, shore_inner, shore_base, shore_color;
 static uint8_t keys[32], pads[40], inputs[2], previous_input, previous_keys;
 static uint8_t paused, switches=0x0b, palette_mask, palette_xor;
+static uint8_t tank_track_phase;
+static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
 static uint8_t state_bytes[32], old_score[12], old_fuel, palette_player;
 static uint16_t ticks, skipped_frames, jet_cache=0xffff;
-/* 1: startup delay, 2: scrolling attract demo, 0: user game. */
+/* 1: startup fade, 2: scrolling attract demo, 0: user game. */
 uint8_t ready=1;
-uint8_t demo_wait=180;
 static uint8_t hud_dirty=1, reflected;
 static uint8_t fuel_rows[16][HUD_FUEL_WIDTH];
 static uint8_t score_rows[12][6];
 uint16_t tia_palette[128];
-static uint16_t sound_frequency[3][32];
 static uint8_t shown_level=255, shown_variant=255, shown_player=255;
 static uint8_t shown_reserves=255, high_dirty=1;
 static uint8_t high_score[6]={88,88,88,88,88,0};
@@ -166,6 +172,7 @@ static const uint8_t hues[16][3] = {
     {13,6,29},{7,9,31},{4,14,31},{3,21,29},{3,26,24},{5,27,14},
     {8,26,5},{18,25,4},{25,23,4},{29,20,4}
 };
+#pragma optimize(push, on)
 static uint16_t tia_rgb(uint8_t code)
 {
     static const uint8_t luminance[8]={0,9,13,17,21,24,26,29};
@@ -183,7 +190,7 @@ static void upload(uint16_t address,const void* data,uint16_t count)
 { xram0_write(address,data,count); }
 static uint16_t image_address(uint8_t id)
 {
-    return id==BALLOON_ID ? XRAM_BALLOON_IMAGE : id==TANK_ID ? XRAM_TANK_IMAGE :
+    return id==8 ? XRAM_BRIDGE_IMAGE : id==BALLOON_ID ? XRAM_BALLOON_IMAGE : id==TANK_ID ? XRAM_TANK_IMAGE :
         XRAM_IMAGES+(uint16_t)id*IMAGE_BYTES;
 }
 static uint16_t palette_address(uint8_t id)
@@ -207,6 +214,7 @@ static uint8_t helicopter_ink(char pixel,uint8_t type)
     return pixel=='B' ? (type ? 5 : 1) : pixel=='G' ? 2 : pixel=='R' ? 3 :
         pixel=='D' ? (type ? 5 : 4) : 0;
 }
+#pragma optimize(pop)
 #pragma code-name(push, "SPLASH")
 static void prepare_helicopters(void)
 {
@@ -228,9 +236,11 @@ static void prepare_helicopters(void)
     memset(row,0,16); row[5]=row[6]=0xee;
     upload(XRAM_HELICOPTER_SHOT,row,16);
 }
+#pragma optimize(push, on)
 static void prepare_tank_animation(void)
 {
-    uint8_t y,x;
+    uint8_t y,x,frame;
+    uint16_t address;
     widths[TANK_ID]=TANK_WIDTH; scales[TANK_ID]=1;
     memcpy(sprite_colors[TANK_ID],tank_colors,sizeof(tank_colors));
     for (y=0;y<TANK_IMAGE_HEIGHT;++y) {
@@ -241,22 +251,24 @@ static void prepare_tank_animation(void)
         }
         upload(XRAM_TANK_IMAGE+(uint16_t)y*(TANK_IMAGE_WIDTH/2),row,TANK_IMAGE_WIDTH/2);
     }
-    xram0_read(row,XRAM_TANK_IMAGE,TANK_IMAGE_BYTES);
-    upload(XRAM_TANK_IMAGE_ALT,row,TANK_IMAGE_BYTES);
-    for (y=0;y<3;++y) {
-        memset(row,0,TANK_IMAGE_WIDTH/2);
-        for (x=0;x<TANK_WIDTH;++x)
-            if (tank_tracks_alt[y][x]!='.')
-                row[x>>1]|=(tank_tracks_alt[y][x]-'0')<<((x&1) ? 0 : 4);
-        upload(XRAM_TANK_IMAGE_ALT+(uint16_t)(6+y)*(TANK_IMAGE_WIDTH/2),row,TANK_IMAGE_WIDTH/2);
+    for (frame=0;frame<2;++frame) {
+        address=tank_images[frame+1];
+        xram0_read(row,XRAM_TANK_IMAGE,TANK_IMAGE_BYTES);
+        upload(address,row,TANK_IMAGE_BYTES);
+        for (y=0;y<3;++y) {
+            memset(row,0,TANK_IMAGE_WIDTH/2);
+            for (x=0;x<TANK_WIDTH;++x)
+                if (tank_tracks_alt[frame][y][x]!='.')
+                    row[x>>1]|=(tank_tracks_alt[frame][y][x]-'0')<<((x&1) ? 0 : 4);
+            upload(address+(uint16_t)(6+y)*(TANK_IMAGE_WIDTH/2),row,TANK_IMAGE_WIDTH/2);
+        }
     }
 }
 static uint16_t tank_image(void)
 {
-    /* Tracks alternate every fourth native frame, half the rotor cadence.
-     * The native counter stops automatically when the game pauses. */
-    return FRAME&4 ? XRAM_TANK_IMAGE_ALT : XRAM_TANK_IMAGE;
+    return tank_images[tank_track_phase];
 }
+#pragma optimize(pop)
 #pragma code-name(pop)
 static uint8_t terrain_row(uint8_t y)
 {
@@ -264,8 +276,6 @@ static uint8_t terrain_row(uint8_t y)
     if (n>=RIVER_RING) n-=RIVER_RING;
     return n;
 }
-static uint8_t road_color(uint8_t code)
-{ return code==4 ? 4 : code==8 ? 5 : code==rr_ColorTab[1] ? 6 : 4; }
 static void terrain_pattern(uint8_t distance, uint8_t* p1, uint8_t* p2)
 {
     uint8_t block=distance>>5,index=(distance&31)>>1,flags=FLAGS(block);
@@ -325,6 +335,7 @@ static uint8_t shore_tile(uint8_t x,uint8_t mirror)
 static void shore_half(void)
 {
     uint8_t start,end,outer,inner;
+    if (shore_color==7) shore_color=TERRAIN_ROAD_UPPER;
     memset(bank_half,shore_color,20);
     if (shore_left==shore_right) return;
     start=(shore_left+3)>>2; end=shore_right>>2;
@@ -342,6 +353,8 @@ static void shore_half(void)
     start=shore_right>>2; if (start<20) bank_half[start]=shore_tile(start*4,0);
     start=inner>>2; if (start<20) bank_half[start]=shore_tile(start*4,0);
 }
+/* Reserve space for all mountain bitmaps in the fixed Debug memory map. */
+#pragma optimize(push, on)
 static void draw_terrain_row(uint8_t y)
 {
     /* Called only from the main loop. Fixed scratch storage avoids cc65's
@@ -370,8 +383,8 @@ static void draw_terrain_row(uint8_t y)
     shore_left=smooth_left(left,(distance&1) ? nl : pl);
     shore_right=smooth_right(right,(distance&1) ? nr : pr);
     color=(flags&4) ? 3 : 2;
-    if ((flags&0x80) && index<13) {
-        color=road_color(rr_RoadColorTab[index]); shore_left=left; shore_right=right;
+    if ((flags&0x80) && index>=3 && index<13) {
+        color=bridge_road[25-(distance&31)]; shore_left=left; shore_right=right;
     } else if (shore_left<shore_right) {
         shore_left=bank_left(shore_left,n); shore_right=bank_right(shore_right,n);
     }
@@ -408,6 +421,7 @@ static void draw_terrain_row(uint8_t y)
     shore_half();
     write_terrain_row(XRAM_TERRAIN+(uint16_t)n*TERRAIN_COLUMNS);
 }
+#pragma optimize(pop)
 static void restart_terrain(void)
 {
     uint8_t y;
@@ -424,6 +438,8 @@ static void rebuild_terrain(void)
     memset(edge_valid,0,sizeof(edge_valid));
     for (y=0;y<160;++y) draw_terrain_row(y);
 }
+/* Keep bounded palette updates compact in the fixed Debug memory map. */
+#pragma optimize(push, on)
 static void refresh_jet_palette(void)
 {
     static uint16_t colors[2];
@@ -439,7 +455,7 @@ static void refresh_palettes(void)
     colors[0]=0; colors[1]=tia_color(rr_ColorTab[4]);
     colors[2]=tia_color(0xd2); colors[3]=tia_color(0xd6);
     colors[4]=tia_color(4); colors[5]=tia_color(8); colors[6]=tia_color(rr_ColorTab[1]);
-    colors[7]=RGB(0,0,0); colors[8]=tia_color(rr_ColorTab[1]); colors[9]=tia_color(0x0c);
+    colors[7]=RGB(0,0,0); colors[8]=tia_color(rr_ColorTab[1]); colors[9]=tia_color(0x06);
     colors[10]=tia_color(rr_ColorTab[2]); colors[11]=tia_color(rr_ColorTab[3]);
     colors[12]=tia_color(0x20); /* Brown bank rim and mountain faces. */
     colors[13]=tia_color(0x32); colors[14]=tia_color(0x2a); colors[15]=tia_color(0xa8);
@@ -462,11 +478,14 @@ static void refresh_palettes(void)
     colors[2]=RGB(23,23,23); upload(XRAM_DEMO_FOOTER_PALETTE,colors,14);
     palette_mask=G(0x86); palette_xor=G(0x85);
 }
+#pragma optimize(pop)
 static char mountain_pixel(uint8_t variant,uint8_t y,uint8_t x)
 { return y<7 || y>=28 ? '.' : mountain_pixels[variant][y-7][x]; }
+/* Startup-only conversion must also fit the fixed RAM map in Debug. */
+#pragma optimize(push, on)
 static void prepare_images(void)
 {
-    static uint8_t id,y,j,bits,x,scale,width;
+    static uint8_t id,y,j,bits,x,scale,width,variant;
     static uint16_t v;
     for (v=0;v<256;++v) {
         bits=v; j=0;
@@ -479,28 +498,37 @@ static void prepare_images(void)
         }
     }
     for (id=0;id<11;++id) {
-        scale=(id==8 || id==9) ? 4 : id==7 ? 2 : 1;
+        scale=id==8 ? 6 : id==9 ? 4 : id==7 ? 2 : 1;
         width=8*scale; scales[id]=scale; widths[id]=width;
         for (y=0;y<32;++y) {
             j=31-y;
             /* The TIA kernel uses A on even block lines and B on odd ones.
-             * Reversing these pairs breaks the negative-space FUEL lettering. */
-            bits=(j<3 || j>=26) ? 0 :
+             * Reversing these pairs breaks the negative-space FUEL lettering.
+             * FUEL spans 24 rows: four six-row color bands. Keep its bottom
+             * gray row below L (j=2), which other sprites do not use. */
+            bits=(id==7 || j<(id==10 ? 2 : 3) || j>=26) ? 0 :
                 G(0xce00+(uint8_t)((j&1 ? rr_shapePtr1bTab[id] : rr_shapePtr1aTab[id])+(j>>1)));
+            if (id==7 && y>=16 && y<24)
+                for (x=0;x<8;++x) if (ship_pixels[y-16][x]=='X') bits|=0x80>>x;
             if (id==9) {
                 bits=0;
-                for (x=0;x<32;++x) if (mountain_pixel(0,y,x)!='.' ||
-                    mountain_pixel(1,y,x)!='.' || mountain_pixel(2,y,x)!='.') {
-                    bits|=0x80>>(x>>2);
-                    if (x<mountain_min_x) mountain_min_x=x;
-                    if (x>mountain_max_x) mountain_max_x=x;
-                }
+                for (x=0;x<32;++x) for (variant=0;variant<MOUNTAIN_VARIANTS;++variant)
+                    if (mountain_pixel(variant,y,x)!='.') {
+                        bits|=0x80>>(x>>2);
+                        if (x<mountain_min_x) mountain_min_x=x;
+                        if (x>mountain_max_x) mountain_max_x=x;
+                        break;
+                    }
+            }
+            if (id!=7 && j<26) sprite_colors[id][(j>>1)+1]=G(0xcf00+(uint8_t)(rr_ColorPtrTab[id]+(j>>1)));
+            if (id==8) {
+                j=y>=8 && y<25 ? bridge_rows[y-8] : 0;
+                bits=j==5 ? 0x24 : j ? 255 : 0;
             }
             masks[id][y]=bits;
-            if (j<26) sprite_colors[id][(j>>1)+1]=G(0xcf00+(uint8_t)(rr_ColorPtrTab[id]+(j>>1)));
             memset(row,0,width/2);
             for (x=0;x<width;++x) if (bits&(0x80>>(x/scale))) {
-                uint8_t ink=(j>>1)+1;
+                uint8_t ink=id==8 ? j : (j>>1)+1;
                 if (id==9) {
                     static uint8_t pixel;
                     pixel=mountain_pixel(0,y,x);
@@ -509,7 +537,7 @@ static void prepare_images(void)
                 }
                 row[x>>1]|=(uint8_t)(ink<<((x&1) ? 0 : 4));
             }
-            upload(XRAM_IMAGES+(uint16_t)id*IMAGE_BYTES+(uint16_t)y*(width/2),row,width/2);
+            upload(image_address(id)+(uint16_t)y*(width/2),row,width/2);
             if (id<4) {
                 memset(row,0,8);
                 for (x=0;x<8;++x) if (bits&(0x80>>x)) row[x]=((j>>1)+1)*17;
@@ -517,15 +545,17 @@ static void prepare_images(void)
             }
         }
         if (id==9) {sprite_colors[id][1]=0x20; sprite_colors[id][2]=0; sprite_colors[id][3]=0x84;}
+        if (id==8) memcpy(sprite_colors[id],bridge_colors,sizeof(bridge_colors));
+        if (id==7) memcpy(sprite_colors[id],ship_colors,sizeof(ship_colors));
     }
-    for (id=1;id<3;++id) for (y=0;y<32;++y) {
+    for (id=1;id<MOUNTAIN_VARIANTS;++id) for (y=0;y<32;++y) {
         memset(row,0,16);
         for (x=0;x<32;++x) {
             static uint8_t pixel;
             pixel=mountain_pixel(id,y,x);
             if (pixel!='.') row[x>>1]|=(pixel=='K' ? 2 : pixel=='U' ? 3 : 1)<<((x&1) ? 0 : 4);
         }
-        upload((id==1 ? XRAM_SMALL_MOUNTAIN : XRAM_MEDIUM_MOUNTAIN)+(uint16_t)y*16,row,16);
+        upload(mountain_images[id]+(uint16_t)y*16,row,16);
     }
     id=BALLOON_ID;
     {
@@ -533,8 +563,9 @@ static void prepare_images(void)
         memcpy(sprite_colors[id],balloon_colors,sizeof(balloon_colors));
         for (y=0;y<32;++y) {
             memset(row,0,4); bits=0;
-            for (x=0;x<8;++x) {
-                uint8_t pixel=balloon_pixels[y][x];
+            /* Center the trimmed 20-row bitmap in the original 32-row canvas. */
+            if (y>=6 && y<26) for (x=0;x<8;++x) {
+                uint8_t pixel=balloon_pixels[y-6][x];
                 if (pixel=='.') continue;
                 j=pixel<='9' ? pixel-'0' : pixel-'A'+10;
                 bits|=0x80>>x;
@@ -553,8 +584,10 @@ static void prepare_images(void)
         upload(XRAM_TANK_BLAST+y*4,row,4);
         if (y<4) {
             memset(row,0,4);
-            for (x=0;x<8;++x) if (tank_shell_pixels[y][x]!='.')
-                row[x>>1]|=(x&1) ? 7 : 0x70;
+            /* VGA storage has four rows; pad the shorter drawing with zero. */
+            if (y<sizeof(tank_shell_pixels)/sizeof(tank_shell_pixels[0]))
+                for (x=0;x<8;++x) if (tank_shell_pixels[y][x]!='.')
+                    row[x>>1]|=(x&1) ? 1 : 0x10;
             upload(XRAM_TANK_SHELL+y*4,row,4);
         }
     }
@@ -569,6 +602,9 @@ static void prepare_images(void)
     prepare_tank_animation();
     prepare_helicopters();
 }
+#pragma optimize(pop)
+/* Keep mountain placement compact alongside the additional bitmap data. */
+#pragma optimize(push, on)
 static void jet_image(void)
 {
     if (JET_ADDRESS==jet_cache) return;
@@ -632,13 +668,14 @@ static int16_t object_x(uint8_t n)
 {
     static int16_t x;
     x=(int16_t)G(0x94+n)*15+((OBJSTATE(n)>>4)^7)-1;
-    /* CalcPosX encodes the bridge at 63; its widened TIA sprite starts at
-     * 64, covering the river [64,96). Use that origin for drawing and hits. */
+    /* CalcPosX encodes the bridge at 63. Its deck covers [56,104),
+     * overlapping each bank by eight logical pixels around [64,96). */
     if (ID(n)==9) return fit_mountain(n,x);
-    return x+(ID(n)==8);
+    return x-(ID(n)==8 ? 7 : 0);
 }
 static uint8_t mountain_variant(uint8_t n)
-{ return (G(0xa6+n)^(G(0xac+n)>>3)^G(0x94+n))%3; }
+{ return (G(0xa6+n)^(G(0xac+n)>>3)^G(0x94+n))%MOUNTAIN_VARIANTS; }
+#pragma optimize(pop)
 #pragma code-name(push, "SPLASH")
 static uint8_t opaque(uint8_t id,uint8_t x,uint8_t y,uint8_t flip,uint8_t block)
 {
@@ -646,10 +683,10 @@ static uint8_t opaque(uint8_t id,uint8_t x,uint8_t y,uint8_t flip,uint8_t block)
     if (id==TANK_ID) {
         if (y<TANK_TOP || y>=TANK_TOP+TANK_HEIGHT) return 0;
         y-=TANK_TOP; if (flip) x=TANK_WIDTH-1-x;
-        return y>=6 && (FRAME&4) ? tank_tracks_alt[y-6][x]!='.' : tank_pixels[y][x]!='.';
+        return y>=6 && tank_track_phase ? tank_tracks_alt[tank_track_phase-1][y-6][x]!='.' : tank_pixels[y][x]!='.';
     }
     if (id==9) return mountain_pixel(mountain_variant(block),y,flip ? 31-x : x)!='.';
-    if (scales[id]==2) x>>=1; else if (scales[id]==4) x>>=2;
+    if (scales[id]==6) x/=6; else if (scales[id]==2) x>>=1; else if (scales[id]==4) x>>=2;
     if (flip) x=7-x;
     return masks[id][y]&(0x80>>x);
 }
@@ -664,27 +701,31 @@ static void sync_tanks(void)
         if (tanks[n].status) continue;
         seed=G(0xa6+n)^G(0xac+n)^G(0xbd);
         tanks[n].direction=seed&1;
-        tanks[n].x=tanks[n].direction ? 112 : 40;
+        /* Start fully outside the playfield, then drive in along the road. */
+        tanks[n].x=tanks[n].direction ? RIVER_WIDTH : -TANK_WIDTH;
         tanks[n].status=1;
     }
 }
 static void move_tanks(void)
 {
     uint8_t n;
+    /* Three phases, four native frames each, including counter wrap.
+     * This update runs only when the game is not paused. */
+    if (!(FRAME&3) && ++tank_track_phase==3) tank_track_phase=0;
     sync_tanks();
     if (MODE) return;
     for (n=0;n<6;++n) {
         if (tanks[n].explosion) --tanks[n].explosion;
         if (tanks[n].status!=1 || (FRAME&1)) continue;
         tanks[n].x+=tanks[n].direction ? -1 : 1;
-        if (tanks[n].x<=24) tanks[n].direction=0;
-        if (tanks[n].x>=128) tanks[n].direction=1;
+        if (tanks[n].x<=-TANK_WIDTH) tanks[n].direction=0;
+        if (tanks[n].x>=RIVER_WIDTH) tanks[n].direction=1;
     }
 }
 static uint8_t tank_on_bridge(uint8_t n)
 {
     int16_t center=tanks[n].x+4,bridge=object_x(n);
-    return tanks[n].status==1 && center>=bridge && center<bridge+32;
+    return tanks[n].status==1 && center>=bridge && center<bridge+widths[8];
 }
 static void destroy_tank(uint8_t n)
 {
@@ -754,15 +795,31 @@ static void clear_enemy_shots(void)
     bank_tanks[0].shot_phase=bank_tanks[1].shot_phase=0;
     memset(helicopter_shots,0,sizeof(helicopter_shots));
 }
+/* Interpolate the drop over the selected range, stopping at track height.
+ * Use main RAM for this helper; the auxiliary segment is almost full. */
+#pragma code-name(push, "CODE")
+#pragma optimize(push, on)
+static uint8_t bank_shot_height(bank_tank_t *t)
+{
+    static int16_t start,distance,travelled;
+    start=t->side ? t->x-6 : t->x+TANK_WIDTH-2;
+    distance=t->side ? start-t->shot_target : t->shot_target-start;
+    travelled=t->side ? start-t->shot_x : t->shot_x-start;
+    if (distance<=0 || travelled>=distance) return TANK_TRACK_BOTTOM_Y;
+    if (travelled<=0) return TANK_MUZZLE_Y;
+    return TANK_MUZZLE_Y+(uint16_t)travelled*(TANK_TRACK_BOTTOM_Y-TANK_MUZZLE_Y)/distance;
+}
+#pragma optimize(pop)
+#pragma code-name(pop)
 static uint8_t bank_choose_target(bank_tank_t *t)
 {
     uint8_t y,r,a,b,left=0,right=160,count;
     /* The largest circle spans eight logical columns and sixteen rows.
      * Intersect actual water intervals across its entire footprint. When
      * an island splits the river, stay in the channel facing this tank. */
-    if (t->y<8-TANK_MUZZLE_Y || t->y>152-TANK_MUZZLE_Y) return 0;
+    if (t->y<8-TANK_TRACK_BOTTOM_Y || t->y>152-TANK_TRACK_BOTTOM_Y) return 0;
     for (y=0;y<16;++y) {
-        r=terrain_row(t->y+TANK_MUZZLE_Y-8+y);
+        r=terrain_row(t->y+TANK_TRACK_BOTTOM_Y-8+y);
         a=river_left[r]; b=river_right[r];
         if (a>=b) return 0;
         if (b==80) b=160-a;
@@ -821,6 +878,9 @@ static void bank_tanks_tick(uint8_t scroll)
         if (t->cooldown) --t->cooldown;
         if (t->shot_phase==1) {
             t->shot_x+=t->side ? -2 : 2;
+            /* Cache the drop for rendering and collisions in this frame.
+             * During the splash, timer instead counts explosion phases. */
+            t->timer=bank_shot_height(t)-TANK_MUZZLE_Y;
             bank_round_hits_fuel(t);
             if (!t->shot_phase) continue;
             if (t->side ? t->shot_x<=t->shot_target : t->shot_x>=t->shot_target) {
@@ -831,7 +891,7 @@ static void bank_tanks_tick(uint8_t scroll)
         } else if (t->x==target && !t->cooldown) {
             if (!bank_choose_target(t)) {t->cooldown=8; continue;}
             t->shot_x=t->side ? t->x-6 : t->x+TANK_WIDTH-2;
-            t->shot_phase=1; t->cooldown=90;
+            t->shot_phase=1; t->timer=0; t->cooldown=90;
         }
     }
     /* Native blocks arrive every 32 rows. Separate tanks by at least two
@@ -855,18 +915,20 @@ static const uint8_t tank_explosion_phases[19]={
 static uint8_t tank_explosion_stage(uint8_t timer)
 { return tank_explosion_phases[timer]; }
 
+#pragma optimize(push, on)
 static void bank_round_hits_fuel(bank_tank_t *t)
 {
     uint8_t n,x,y;
-    int16_t ox,oy,dx,dy;
+    int16_t ox,oy,dx,dy,shot_y;
     if (t->shot_phase!=1) return;
+    shot_y=t->y+TANK_MUZZLE_Y+t->timer-1;
     for (n=0;n<6;++n) {
         if (ID(n)!=10) continue;
         ox=object_x(n); oy=128+OFFSET-(int16_t)n*32;
         if (t->shot_x+6<=ox || t->shot_x+2>=ox+widths[10]) continue;
-        for (y=TANK_MUZZLE_Y;y<TANK_MUZZLE_Y+2;++y) {
-            dy=t->y+y-oy; if (dy<0 || dy>=32) continue;
-            for (x=2;x<6;++x) {
+        for (y=0;y<sizeof(tank_shell_pixels)/sizeof(tank_shell_pixels[0]);++y) {
+            dy=shot_y+y-oy; if (dy<0 || dy>=32) continue;
+            for (x=2;x<6;++x) if (tank_shell_pixels[y][x]!='.') {
                 dx=t->shot_x+x-ox;
                 if (dx>=0 && dx<widths[10] && opaque(10,dx,dy,(OBJSTATE(n)&8)!=0,n)) {
                     /* Use the native explosion sequence and sound, while
@@ -878,6 +940,7 @@ static void bank_round_hits_fuel(bank_tank_t *t)
     }
 }
 
+#pragma optimize(pop)
 static void bank_tanks_collisions(void)
 {
     uint8_t n,y,x,bits,stage,px=PX+(reflected!=0);
@@ -902,7 +965,7 @@ static void bank_tanks_collisions(void)
         /* Traveling rounds are safe, as in the 5200 manual. Only opaque
          * splash pixels are tested against opaque native jet pixels. */
         for (y=0;y<18;++y) {
-            dy=142+y-(t->y+TANK_MUZZLE_Y-8); if (dy<0 || dy>=16) continue;
+            dy=142+y-(t->y+TANK_TRACK_BOTTOM_Y-8); if (dy<0 || dy>=16) continue;
             bits=G(JET_ADDRESS+18-y);
             for (x=0;x<8;++x) if (bits&(reflected ? (1<<x) : (0x80>>x))) {
                 dx=px+x-t->shot_x;
@@ -936,10 +999,10 @@ static void bank_tanks_render(void)
             stage=t->shot_phase==2 ? tank_explosion_stage(t->timer) : 0;
             if (stage==255) continue;
             ++s; s->x=t->shot_x*2;
-            s->y=RIVER_TOP+t->y+(t->shot_phase==1 ? TANK_MUZZLE_Y-1 : TANK_MUZZLE_Y-8);
+            s->y=RIVER_TOP+t->y+(t->shot_phase==1 ? TANK_MUZZLE_Y+t->timer-1 : TANK_TRACK_BOTTOM_Y-8);
             s->image=t->shot_phase==1 ? XRAM_TANK_SHELL :
                 XRAM_TANK_CIRCLES+(uint16_t)stage*64;
-            s->palette=t->shot_phase==1 ? XRAM_PALETTE : XRAM_TANK_EXPLOSION_PALETTE;
+            s->palette=XRAM_TANK_EXPLOSION_PALETTE;
             s->size=t->shot_phase==1 ? 0x01 : 0x31; s->options=0x42;
         }
     }
@@ -1037,6 +1100,8 @@ jet_checked:
         if (sy>=0 && sy<160 && land_at(MX,sy)) {G(0xe6)=0; break;}
     }
 }
+/* Keep bounded input decoding compact in the fixed Debug memory map. */
+#pragma optimize(push, on)
 static uint8_t pressed(uint8_t code)
 { return (keys[code>>3]&(1<<(code&7)))!=0; }
 static uint8_t read_input(void)
@@ -1074,7 +1139,10 @@ static uint8_t read_input(void)
     G(0x22d)=(inputs[1]&FIRE) ? 0 : 128;
     return v;
 }
+#pragma optimize(pop)
 /* Pack the first eight readable pixels into the MSB-first glyph format. */
+/* Keep presentation compact enough for all three audio backends in Debug. */
+#pragma optimize (push, on)
 static uint8_t bitmap_row(const char* pixels)
 {
     uint8_t bits=0,mask=0x80;
@@ -1174,7 +1242,9 @@ static void draw_hud(void)
         hud_column=HUD_FUEL_X; hud_length=HUD_FUEL_WIDTH;
         for (y=0;y<16;++y) {
             memcpy(row+HUD_FUEL_X,fuel_rows[y],HUD_FUEL_WIDTH);
-            if (y>=5 && y<15) row[HUD_FUEL_X+4+fy]=row[HUD_FUEL_X+5+fy]=0xbb;
+            /* Keep the gauge lettering in front of the moving needle. */
+            if (y>=5 && y<15) for (i=0;i<2;++i)
+                if (fuel_rows[y][4+fy+i]==0xaa) row[HUD_FUEL_X+4+fy+i]=0xbb;
             write_hud_span(XRAM_HUD+(uint16_t)(HUD_FUEL_Y+y)*RIVER_WIDTH+HUD_FUEL_X);
         }
     }
@@ -1205,8 +1275,7 @@ static void render(void)
         sprites[n+2].x=object_x(n)*2; sprites[n+2].y=RIVER_TOP+128+OFFSET-(int16_t)n*32;
         sprites[n+2].image=image_address(id);
         if ((id==5 || id==6) && helicopter_type(n)) sprites[n+2].image+=128;
-        if (id==9) sprites[n+2].image=mountain_variant(n)==0 ? XRAM_IMAGES+9*IMAGE_BYTES :
-            mountain_variant(n)==1 ? XRAM_SMALL_MOUNTAIN : XRAM_MEDIUM_MOUNTAIN;
+        if (id==9) sprites[n+2].image=mountain_images[mountain_variant(n)];
         sprites[n+2].palette=palette_address(id);
         sprites[n+2].size=0x70|((widths[id]>>2)-1);
         sprites[n+2].options=0x42|((OBJSTATE(n)&8) ? 0x10 : 0);
@@ -1247,16 +1316,7 @@ static void render(void)
         if (!paused) --G(0x8d);
         xram0_poke16(XRAM_PALETTE+2,c);
     } else xram0_poke16(XRAM_PALETTE+2,tia_color(rr_ColorTab[4]));
-    for (n=0;n<2;++n) {
-        static uint8_t ctrl,volume;
-        ctrl=G(0x215+n)&15; volume=G(0x219+n)&15;
-        sound[n].freq=sound_frequency[ctrl==4 ? 1 : ctrl==12 ? 2 : 0][G(0x217+n)&31];
-        sound[n].duty=128;
-        sound[n].attack=sound[n].decay=(15-volume)<<4;
-        sound[n].release_wave=(ctrl==8 || ctrl<4) ? 0x40 : 0x10;
-        sound[n].pan_gate=volume && !paused;
-    }
-    upload(XRAM_PSG,sound,16);
+    audio_update(paused,ready || MODE==255);
     state_bytes[0]=0x52; state_bytes[1]=3;
     state_bytes[2]=ready || MODE==255 ? 3 : MODE==0 ? 1 : MODE>=128 ? 2 : 0;
     state_bytes[3]=PX; state_bytes[4]=G(0xc0)<80 ? G(0xc0)/8 : 0;
@@ -1279,22 +1339,17 @@ static void render(void)
 static uint8_t configure_video(void)
 {
     static uint8_t y,i,x,bits;
-    static uint16_t hz;
     if (xreg(1,0,0,1)<0) return 0;
-    for (i=0;i<32;++i) {
-        hz=31400u/(i+1u);
-        sound_frequency[0][i]=(hz>21845u ? 21845u : hz)*3;
-        sound_frequency[1][i]=(hz>>1)*3;
-        sound_frequency[2][i]=(hz/6)*3;
-    }
     for (i=0;i<8;++i) tile_mirror[i]=i;
     for (i=0;i<7;++i) xram0_set(XRAM_TILES+(uint16_t)i*32,i*17,32);
-    for (i=8;i<TERRAIN_TILE_COUNT;++i) {
+    tile_mirror[TERRAIN_ROAD_UPPER]=TERRAIN_ROAD_UPPER;
+    xram0_set(XRAM_TILES+TERRAIN_ROAD_UPPER*32,0x99,32);
+    for (i=8;i<TERRAIN_ROAD_UPPER;++i) {
         uint8_t variant=(i-8)%18,land=2+(i-8)/18,pattern=variant%9;
         tile_mirror[i]=variant<9 ? i+9 : i-9;
         for (x=0;x<8;++x) {
             uint8_t pixel=bank_pixels[pattern][variant<9 ? x>>1 : 3-(x>>1)];
-            uint8_t color=pixel=='B' ? 12 : pixel=='W' ? 1 : land;
+            uint8_t color=pixel=='B' ? 12 : pixel=='W' ? 1 : land==7 ? 9 : land;
             if (x&1) row[x>>1]|=color; else row[x>>1]=color<<4;
         }
         for (y=0;y<8;++y) upload(XRAM_TILES+(uint16_t)i*32+y*4,row,4);
@@ -1372,7 +1427,10 @@ static uint8_t configure_video(void)
     /* Prepare the entire first frame before enabling its planes. XRAM still
      * contains cover pixels, so even a partially initialized scene can flash. */
     upload(XRAM_TERRAIN_CONFIG,&terrain,sizeof(terrain));
-    rebuild_terrain(); render(); present_frame();
+    rebuild_terrain();
+    if (!audio_init()) return 0;
+    render(); present_frame();
+    game_fade_prepare();
     if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),SPRITE_COUNT-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
@@ -1380,18 +1438,21 @@ static uint8_t configure_video(void)
         xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_DEMO_FOOTER_CONFIG,1,HUD_FOOTER_Y,HUD_FOOTER_Y+8)<0 ||
-        xreg(0,0,0,XRAM_KEYBOARD)<0 || xreg(0,0,2,XRAM_GAMEPADS)<0 ||
-        xreg(0,1,0,XRAM_PSG)<0) return 0;
+        xreg(0,0,0,XRAM_KEYBOARD)<0 || xreg(0,0,2,XRAM_GAMEPADS)<0) return 0;
+    game_fade_in();
     return 1;
 }
-int main(void)
+/* Keep startup and the frame loop compact in the fixed Debug RAM map. */
+int main(int argc,char** argv)
 {
     uint8_t last_vsync,now,delta,input,controls,old_offset,old_intro,scroll,y;
+    input=audio_options(argc,argv);
+    if (input) return input==1 ? 0 : 2;
     RIA.step0=1; RIA.step1=1;
     show_cover();
     memset((void*)0x200,0,256); G(0x282)=switches; rr_init(); G(0x86)=255;
     /* Prepare the original title scene before showing it, so the river is
-     * stationary throughout the startup delay. No joystick is held. */
+     * stationary throughout the startup fade. No joystick is held. */
     G(0x280)=255; G(0x22c)=G(0x22d)=128;
     while (MODE!=255) rr_step();
     xram0_set(XRAM_PSG,0,64);
@@ -1407,14 +1468,14 @@ int main(void)
 #endif
         input=read_input(); if (input&QUIT) break;
         controls=(pressed(0x3a) ? 1 : 0)|(pressed(0x3b) ? 2 : 0)|
-                 (pressed(0x3c) ? 4 : 0)|(pressed(0x3d) ? 8 : 0)|
-                 (pressed(0x3e) ? 16 : 0);
+                 (pressed(0x3c) ? 4 : 0)|(pressed(0x3e) ? 8 : 0)|
+                 (pressed(0x3f) ? 16 : 0);
         if ((controls&1) && !(previous_keys&1)) switches^=8;
         if ((controls&4) && !(previous_keys&4)) {
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
         }
-        if ((controls&16) && !(previous_keys&16)) switches^=64;
-        if ((controls&8) && !(previous_keys&8)) switches^=128;
+        if ((controls&8) && !(previous_keys&8)) switches^=64;
+        if ((controls&16) && !(previous_keys&16)) switches^=128;
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
         if (((controls&4) && !(previous_keys&4)) ||
@@ -1426,7 +1487,7 @@ int main(void)
         previous_input=input;
         PROFILE_PHASE(0);
         if (!paused) {
-            demo_tick(delta);
+            demo_tick();
             if (ready) {
                 G(0x280)=255; G(0x22c)=G(0x22d)=128;
             }
@@ -1439,6 +1500,7 @@ int main(void)
             if (!(G(0x282)&1) || (old_intro>=128 && MODE<128)) {
                 restart_terrain(); jet_cache=0xffff;
                 memset(tanks,0,sizeof(tanks));
+                tank_track_phase=0;
                 memset(bank_tanks,0,sizeof(bank_tanks)); scroll=0;
                 memset(helicopter_shots,0,sizeof(helicopter_shots));
                 memset(helicopter_types,0,sizeof(helicopter_types)); helicopter_spawn=0;
@@ -1475,7 +1537,8 @@ int main(void)
         xram0_write(XRAM_TIMING,timings,sizeof(timings));
 #endif
     }
-    xram0_set(XRAM_PSG,0,64);
-    xreg(0,0,0,0xffff); xreg(0,0,2,0xffff); xreg(0,1,0,0xffff); xreg(1,0,0,0);
+    audio_stop();
+    xreg(0,0,0,0xffff); xreg(0,0,2,0xffff); xreg(1,0,0,0);
     return 0;
 }
+#pragma optimize(pop)

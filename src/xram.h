@@ -37,12 +37,24 @@ typedef struct {
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
  * pixels before game initialization. Game graphics reuse these regions. */
 #define XRAM_COVER_STATE 0x00B0
+/* Game fade: level 0 black .. 32 full, then VSYNC; startup-only scratch. */
+#define XRAM_GAME_FADE_LEVEL 0x00B2
+#define XRAM_GAME_FADE_SOURCE 0xD000
+#define XRAM_GAME_FADE_STAGING 0xD300
 /* Startup-only prompt, before the game reuses these XRAM regions. */
 #define XRAM_COVER_PROMPT_CONFIG 0x02A0
 #define XRAM_COVER_PROMPT_IMAGE 0x0800
 #define XRAM_COVER_PROMPT_PALETTE 0x0850
 #define XRAM_PALETTE 0x0100
 #define XRAM_PSG 0x0180
+/* PCM extension: mono signed 8-bit, 8000 Hz, 2048-byte ring after header.
+ * Initialized after the cover, whose pixels temporarily occupy this space. */
+#define XRAM_PCM 0xC000
+/* OPL2 reuses this page only when PCM is not selected. */
+#define XRAM_OPL XRAM_PCM
+_Static_assert(XRAM_PCM + 64 + 2048 <= XRAM_GAME_FADE_SOURCE, "Fade overlaps audio");
+_Static_assert(XRAM_GAME_FADE_SOURCE + 576 <= XRAM_GAME_FADE_STAGING, "Fade buffers overlap");
+_Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow");
 #define XRAM_TERRAIN_CONFIG 0x0200
 #define XRAM_HUD_CONFIG 0x0220
 #define XRAM_SPRITES 0x0300
@@ -52,9 +64,12 @@ typedef struct {
 #define XRAM_HUD_BLACK_PALETTE 0x05A0
 #define XRAM_TERRAIN 0x0800
 #define XRAM_TILES 0x2700
-#define XRAM_LOGO_IMAGE 0x3400
+#define XRAM_LOGO_IMAGE 0x5A00
 #define XRAM_SMALL_MOUNTAIN 0x3600
 #define XRAM_MEDIUM_MOUNTAIN 0x5800
+#define XRAM_STEPPED_MOUNTAIN 0x5C00
+#define XRAM_WIDE_MOUNTAIN 0x5E00
+#define XRAM_BRIDGE_IMAGE 0x6000
 #define XRAM_IMAGES 0x8000
 #define XRAM_SPRITE_PALETTES 0x0400
 #define XRAM_JET_PALETTE 0x0580
@@ -71,6 +86,7 @@ typedef struct {
 #define XRAM_TANK_IMAGE_ALT 0xBF00
 #define XRAM_TANK_EXPLOSION_PALETTE 0xBF80
 #define XRAM_HELICOPTER_SHOT 0xBF90
+#define XRAM_TANK_IMAGE_ALT2 0xBFA0
 #define XRAM_SCORE_DIGITS 0x9E00
 #define XRAM_GAME_DIGITS (XRAM_SCORE_DIGITS + 12 * 32)
 #define XRAM_BALLOON_PALETTE 0x05C0
@@ -84,7 +100,8 @@ typedef struct {
 #define HUD_HEIGHT 48
 #define RIVER_RING 192
 #define TERRAIN_COLUMNS (RIVER_WIDTH / 4)
-#define TERRAIN_TILE_COUNT 98
+#define TERRAIN_TILE_COUNT 117
+#define TERRAIN_ROAD_UPPER 116
 #define TERRAIN_BANK_SOLID 7
 #define HUD_SPRITE_COUNT 19
 #define XRAM_RESERVE_IMAGE (XRAM_HUD_DIGITS + 12 * 32)
@@ -96,6 +113,7 @@ typedef struct {
 #define TANK_HEIGHT 9
 #define TANK_TOP 8
 #define TANK_MUZZLE_Y (TANK_TOP + 1)
+#define TANK_TRACK_BOTTOM_Y (TANK_TOP + TANK_HEIGHT - 1)
 #define TANK_IMAGE_WIDTH 12
 #define TANK_IMAGE_HEIGHT 16
 #define TANK_IMAGE_BYTES (TANK_IMAGE_WIDTH * TANK_IMAGE_HEIGHT / 2)
@@ -112,7 +130,13 @@ _Static_assert(XRAM_TERRAIN + TERRAIN_COLUMNS * RIVER_RING <= XRAM_TILES, "Terra
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_IMAGES, "Tiles overlap sprites");
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_LOGO_IMAGE, "Tiles overlap logo");
 _Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_IMAGES, "Logo overlaps sprites");
-_Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_SMALL_MOUNTAIN, "Logo overlaps mountain");
+_Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_SMALL_MOUNTAIN, "Tiles overlap mountain");
+_Static_assert(XRAM_MEDIUM_MOUNTAIN + IMAGE_BYTES <= XRAM_LOGO_IMAGE, "Mountain overlaps logo");
+_Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_STEPPED_MOUNTAIN, "Logo overlaps stepped mountain");
+_Static_assert(XRAM_STEPPED_MOUNTAIN + IMAGE_BYTES <= XRAM_WIDE_MOUNTAIN, "Mountain images overlap");
+_Static_assert(XRAM_WIDE_MOUNTAIN + IMAGE_BYTES <= XRAM_BRIDGE_IMAGE, "Mountain overlaps bridge");
+_Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_BRIDGE_IMAGE, "Logo overlaps bridge");
+_Static_assert(XRAM_BRIDGE_IMAGE + 48 * 32 / 2 <= XRAM_IMAGES, "Bridge overlaps sprites");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Mountain overlaps sprites");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_DEMO_FOOTER_IMAGE, "Mountain overlaps demo footer");
 _Static_assert(XRAM_MEDIUM_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Medium mountain overlaps sprites");
@@ -140,4 +164,8 @@ _Static_assert(XRAM_TANK_IMAGE_ALT + TANK_IMAGE_BYTES <= XRAM_TANK_EXPLOSION_PAL
 _Static_assert(XRAM_TANK_EXPLOSION_PALETTE + 4 <= 65536UL, "Tank explosion palette overflow");
 _Static_assert(XRAM_TANK_EXPLOSION_PALETTE + 4 <= XRAM_HELICOPTER_SHOT, "Tank palette overlaps helicopter shot");
 _Static_assert(XRAM_HELICOPTER_SHOT + 16 <= 65536UL, "Helicopter shot overflow");
+_Static_assert(XRAM_HELICOPTER_SHOT + 16 <= XRAM_TANK_IMAGE_ALT2, "Helicopter shot overlaps tank animation");
+_Static_assert(XRAM_TANK_IMAGE_ALT2 + TANK_IMAGE_BYTES <= XRAM_PCM, "Tank animation overlaps PCM");
+_Static_assert(XRAM_PCM + 8 + 2048 <= 65536UL, "PCM ring overflow");
+_Static_assert(XRAM_OPL % 256 == 0, "OPL page alignment");
 #endif

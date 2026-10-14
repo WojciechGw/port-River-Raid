@@ -18,13 +18,13 @@ The original 6502 routines handle the course, enemies, acceleration, fuel,
 scoring, extra lives, respawning in the saved section, and two-player games.
 The graphics combine original bitmaps with a palette and scenery inspired
 by Atari XL and 5200 screenshots: smooth brown banks of varying width,
-two mountain variants (blue slopes or black ridges), and dark blue water.
+five mountain variants (blue slopes or black ridges), and dark blue water.
 The added balloons have multicolored envelopes and baskets, while tanks
 drive along the roads across bridges. From bridge 7, additional tanks
 approach the river from either side and fire from the banks at random distances.
 The entire largest impact circle stays within the water; tanks facing an
 island fire into their own channel. Both tank types
-have animated tracks, running at half the helicopter animation cadence. Tank rounds in flight
+have three-frame animated tracks, running at half the helicopter animation cadence. Tank rounds in flight
 do not harm the plane; their growing white filled circles on the water do.
 The reference tank silhouette has a distinct barrel and separated black wheels.
 Two helicopter variants share animated salmon rotors. From level 5, one in
@@ -35,14 +35,40 @@ Each small, medium, and large impact circle is erased before the next phase.
 Tank rounds can also destroy FUEL depots, without awarding player points.
 The panel shows the score, fuel,
 player, game variation, bridge number, session high score (HI), and reserve
-planes. Sound maps the TIA registers to the PSG.
-RGB555 colors and noise remain approximations. Compatibility and limitations
+planes. Audio offers PSG, OPL2 and PCM backends, guided by an Atari XL/XE
+recording. Speed and throttle change the engine's noise bandwidth and volume;
+PSG uses eight oscillators and OPL2 nine channels to keep the engine playing
+alongside shots, blasts and fuel tones. Missiles descend in
+pitch, and explosions have a low body rather than metallic percussion.
+Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
 ## Building and running
 
 Requirements: CMake 3.21+, Ninja, Python 3, and cc65 with the `rp6502` target.
 SDK installation instructions: https://picocomputer.github.io/sdk.html
+
+PSG and OPL2 use the standard RIA sound interfaces. Only PCM requires the
+firmware extension `XREG(0,1,2,base)`. Building this game does not update
+firmware on the physical computer. See [PORTING.md](PORTING.md) for details.
+
+Choose audio when loading the game on the computer:
+
+```text
+load riverraid.rp6502 /psg
+load riverraid.rp6502 /opl2
+load riverraid.rp6502 /pcm
+```
+
+No parameter selects OPL2. `/auto` selects PCM when supported, otherwise OPL2.
+Explicit `/pcm` reports an error if the firmware lacks PCM.
+Options are case insensitive; if several are supplied, the last one wins.
+`/help` displays usage without opening the cover.
+In the emulator, put the game arguments after `--`:
+
+```powershell
+.\tools\rp6502-emu.exe .\build\cc65\release\riverraid.rp6502 -- /opl2
+```
 
 ```powershell
 cmake --preset cc65/Release
@@ -69,7 +95,8 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F1 | Color / black and white |
 | F2 | SELECT: one-player or two-player variation |
 | F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
-| F5, F4 | Player 1 / 2: guided or straight missiles |
+| F5 | Player 1: guided or straight missiles |
+| F6 | Player 2: guided or straight missiles |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Exit to the console |
@@ -91,8 +118,9 @@ A small white "PRESS ANY KEY" message blinks below the image, visible for half
 a second and hidden for half a second. The cover and its palettes are named
 assets in the `.rp6502` file, loaded from `ROM:cover.bin` and `ROM:cover-fade.bin`;
 the message bitmap is loaded from `ROM:cover-prompt.bin`.
-After displaying the game screen, the program waits 3 seconds, then starts
-the scrolling caption and the demo with the scrolling river simultaneously.
+The entire game screen fades in from black over about one second, including
+the river, objects, HUD and logo. The scrolling caption and demo start together
+as soon as the fade finishes, without an additional delay.
 The text and glyphs can be edited in `src/demo-footer.json`.
 
 ## Emulator tests
@@ -112,7 +140,10 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 
 ## Source code
 
-- `src/main.c`: RIA/VGA/PSG configuration, raster rendering, input, and collisions.
+- `src/main.c`: RIA/VGA configuration, raster rendering, input, and collisions.
+- `src/audio.c`: command-line audio selection, PSG layers and OPL2 FM patches.
+- `src/engine.asm`: timer-clocked binary noise for the PSG engine, independent of PCM.
+- `src/audio.asm`: clocked noise, tones and streaming PCM ring producer.
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.
 - `src/riverraid.asm`: fast scanline transfers and sprite/terrain collisions.
@@ -122,4 +153,9 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 - `tools/port_original.py`: automatic DASM-to-ca65 translation and selection
   of the original routines. Generates `original_core.asm` in the build directory.
 - `tools/make_cover.py`: converts `assets/cover.bmp` and prepares fade palettes.
+- `tools/preview_audio.py`: offline PCM/PSG listening previews from captured parameters.
+- `tools/preview_synth.py`: PSG/OPL register-trace WAV previews and spectral/Haar measurements.
+- `tools/compare_synth.py`: preview signal checks and an optional RMS-matched XL/XE comparison.
+- `tools/opl_preview.c`: optional native shim for the firmware's emu8950 preview model.
+- `tools/analyze_audio.py`: WAV spectral measurements and spectrograms.
 - `original/riverraid.asm`: unchanged reference source.

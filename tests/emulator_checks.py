@@ -232,10 +232,255 @@ def check_bank_detail(config, terrain, tiles, river1, river2):
     raise AssertionError("Native straight bank still lacks the reference's small water-edge bends")
 
 
+def run_audio_checks(case,sym,fixture,resume,start,output):
+    # PCM must be explicitly supported, and PSG must stay silent alongside it.
+    _, samples=case("audio-pcm-init-and-pause",fixture+[
+        f'peek 0x{sym["pcm_enabled"]:04x} 1',"dump xram:0xc000 8",
+        "dump xram:0x0180 64",f'dump 0x{sym["pcm_amplitude"]:04x} 2'],rom_args=("/pcm",))
+    header,psg,amplitude=samples
+    assert header[2:6]==bytes((3,11,0x40,0x1f)), "PCM format/rate/ring mismatch"
+    assert not any(psg) and not any(amplitude), "Pause retained audible voices"
+
+    audio_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
+                f'dump 0x{sym["pcm_step"]:04x} 4',f'dump 0x{sym["pcm_tone"]:04x} 2']
+    _, samples=case("audio-engine-response",fixture+[poke(0xf8,[0]*4)] + resume + [
+        "dump 0x0215 6"]+audio_dump+[
+        "press up","run 40","dump 0x0215 6"]+audio_dump+[
+        "release up","run 2","press down","run 40","dump 0x0215 6"]+audio_dump+[
+        "release down","run 2","press p","run 3","release p","run 3"]+audio_dump+[
+        "press p","run 3","release p","run 3","press f2","run 4","release f2","run 12",
+        f'wait 0x{sym["ready"]:04x} 2 60']+audio_dump,rom_args=("/pcm",))
+    assert [samples[i][4]&15 for i in (0,4,8)]==[5,7,4], "Native throttle volumes changed"
+    trace=[]
+    for i,label in zip((0,4,8),("idle","accelerating","braking")):
+        native,amplitude,steps,tone=samples[i:i+4]
+        assert tone[0]==0 and amplitude[0]==(native[4]&15)*2
+        trace.append(dict(label=label,tia=list(native),amplitude=list(amplitude),
+                          step=list(struct.unpack("<HH",steps)),tone=list(tone)))
+    pitches=[s["step"][0] for s in trace]
+    assert pitches[1]>pitches[0] and pitches[2]<pitches[1], "Throttle lost its noise clock"
+    assert not any(samples[12]) and not any(samples[15]), "Pause/demo retained audio"
+    import json
+    (output / "audio-engine.json").write_text(json.dumps(trace,indent=2),encoding="utf-8")
+
+    for effect,control in (("explosion",8),("refuel",4),("alarm",12)):
+        setup=[poke(0xf8,[1,31])] if effect=="explosion" else \
+              [poke(0xf8,[3,8])] if effect=="refuel" else [poke(0xf8,[0,63]),poke(0xb7,32)]
+        _, samples=case(f"audio-priority-{effect}",fixture+setup+resume+[
+            "dump 0x0215 6"]+audio_dump,rom_args=("/pcm",))
+        native,amplitude,steps,tone=samples
+        assert native[0]&15==control and amplitude[0]==(native[4]&15)*2
+        assert tone[0]==(control!=8), "Native effect lost its waveform"
+        if effect=="explosion":
+            assert struct.unpack_from("<H",steps)[0]*8000/65536==2000, "Death blast is too bright"
+
+    # --mute does not consume PCM. Advance its read pointer explicitly, taking
+    # actual CPU-produced pages, rather than validating a Python synthesizer.
+    import wave
+    audio_output=output / "audio"
+    audio_output.mkdir(exist_ok=True)
+    for name,setup,pages in (
+        ("engine-slow",["press down","run 60"],24),
+        ("engine-fast",[poke(0xb5,254),"press up","run 2"],24),
+        ("explosion",[poke(0xf8,[1,31])],8),
+        ("missile",[poke(0xfb,15)],5),
+    ):
+        commands=fixture+[poke(0xf8,[0]*4)]+resume+setup
+        for page in range(pages):
+            index=(page*2+2)&7   # startup silence occupies two pages
+            # Keep this listening fixture in its safe corridor: no course
+            # advance, fuel alarm, enemy hit or refueling during engine capture.
+            commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),
+                         poke(0xc006,[0,index]).replace("poke ","poke xram:",1),"run 4",
+                         "dump xram:0xc000 2",f"dump xram:0x{0xc008+index*256:04x} 512"]
+        _, buffers=case(f"audio-capture-{name}",commands,rom_args=("/pcm",))
+        data=bytearray()
+        for page in range(pages):
+            pointer,block=buffers[page*2:page*2+2]
+            assert pointer==bytes((0,(page*2+4)&7)), "PCM producer failed to publish/wrap an atomic page"
+            data.extend(block)
+        signed=[v if v<128 else v-256 for v in data]
+        assert max(signed)<=60 and min(signed)>=-60, "PCM mixer overflow/clipping"
+        assert len(set(signed))>2, "PCM filtering/noise generator is stuck"
+        with wave.open(str(audio_output/f"{name}-cpu.wav"),"wb") as wav:
+            wav.setparams((1,2,8000,len(signed),"NONE","not compressed"))
+            wav.writeframes(struct.pack(f"<{len(signed)}h",*(v*256 for v in signed)))
+
+    # Stress actual generation during scrolling and firing at 8000 samples/s.
+    # The scripted consumer has the same fractional 133/134-sample cadence
+    # as 8 kHz / 60 Hz; it starts after the queued startup silence.
+    commands=start+["press up space"]
+    for frame in range(1200):
+        pointer=((frame*8000)//60)&2047
+        commands += [poke(0xc006,list(struct.pack("<H",pointer))).replace("poke ","poke xram:",1),"run 1"]
+    case("audio-stream-frame-budget",commands+["release up space","run 2"],rom_args=("/pcm",))
+    run_synth_checks(case,sym,fixture,resume,start,output)
+
+
+def run_synth_checks(case,sym,fixture,resume,start,output):
+    import json
+    case("audio-option-default-opl2",fixture+[
+        f'peek 0x{sym["audio_backend"]:04x} 2',f'peek 0x{sym["pcm_enabled"]:04x} 0'])
+    for option,backend in (("/psg",1),("/opl2",2),("/pcm",3),("/auto",3),("/OPL2",2)):
+        case("audio-option-"+option[1:],fixture+[
+            f'peek 0x{sym["audio_backend"]:04x} {backend}',
+            f'peek 0x{sym["pcm_enabled"]:04x} {int(backend==3)}'],rom_args=(option,))
+    for options,backend in ((("/pcm","/opl2"),2),(("/opl2","/auto"),3)):
+        case("audio-options-last-"+options[-1][1:],fixture+[
+            f'peek 0x{sym["audio_backend"]:04x} {backend}'],rom_args=options)
+    case("audio-invalid-option",["expect-exit 2 120"],gameplay=False,rom_args=("/wrong",))
+    case("audio-help-option",["expect-exit 0 120"],gameplay=False,rom_args=("/help",))
+
+    for mode in ("psg","opl2"):
+        address,count=(0x0180,64) if mode=="psg" else (0xc000,256)
+        dump=[f'dump xram:0x{address:04x} {count}']
+        meta=[f'dump 0x{sym["engine_latch"]:04x} 2',
+              f'dump 0x{sym["engine_active"]:04x} 2',
+              f'dump 0x{sym["engine_frame"]:04x} 4'] if mode=="psg" else []
+        snapshot=dump+meta[:1]
+        commands=fixture+[poke(0xf8,[0]*4)]+resume+[
+            "press down","run 8"]+snapshot+["release down",poke(0xb5,254),"press up","run 4"]+snapshot+[
+            "release up","press p","run 3","release p","run 3"]+snapshot+[
+            "press p","run 3","release p","run 3","press f2","run 4","release f2","run 12",
+            f'wait 0x{sym["ready"]:04x} 2 60']+snapshot
+        _,buffers=case("audio-"+mode+"-throttle-and-mute",commands,rom_args=("/"+mode,))
+        slow,fast,paused,demo=buffers[::2] if mode=="psg" else buffers
+        if mode=="psg":
+            means=[8000000/(int.from_bytes(s,'little')+2) for s in buffers[1:4:2]]
+            assert 900<means[0]<1400 and means[1]>means[0]*2.7, "PSG noise clock does not follow throttle"
+            assert all(s[n*8:n*8+2]==b'\0\0' and s[n*8+5]==(0x30 if n&1 else 0x10)
+                       and s[n*8+6]&1 for s in (slow,fast) for n in range(4,8))
+            assert all(not (s[n*8+6]&1) for s in (paused,demo) for n in range(8))
+        else:
+            def pitch(s,n=0):
+                return (s[0xa0+n]|((s[0xb0+n]&3)<<8))*49716*(2**((s[0xb0+n]>>2)&7))/(2**20)
+            means=[sum(pitch(s,n) for n in range(4))/4 for s in (slow,fast)]
+            assert 5<means[0]<80 and means[1]>means[0]*1.3, "OPL noise spectrum does not follow speed"
+            assert all(s[0xc0+n]==0 and s[0x20+slot]==0x23 and s[0x40+slot]==6
+                       for s in (slow,fast) for n,slot in enumerate((0,1,2,8)))
+            assert all(s[0xb0+n]&32 for s in (slow,fast) for n in range(4))
+            assert all(not (s[0xb0+n]&32) for s in (paused,demo) for n in range(9))
+            assert all(s[0x43+n]==63 for s in (paused,demo) for n in (0,1,2,8,9,10,16,17,18))
+            commands=fixture+[poke(0xf8,[0]*4)]+resume+["press up"]
+            for speed in (64,68,64):
+                commands += [poke(sym["noise_rng"],[2,0x65]),poke(0xb5,speed),"run 1"]+dump
+            _,buffers=case("audio-opl2-small-speed-change",commands,rom_args=("/opl2",))
+            first,faster,repeated=buffers
+            assert all(pitch(first,n)==pitch(repeated,n) for n in range(4)), "Noise seed replay changed"
+            assert all(pitch(faster,n)>=pitch(first,n) for n in range(4))
+            assert sum(pitch(faster,n) for n in range(4))>sum(pitch(first,n) for n in range(4)), \
+                "Engine ignores speed changes within a 16-step band"
+
+        for effect,setup,tone in (
+            ("blast",[poke(0xf8,[1,31])],False),
+            ("refuel",[poke(0xf8,[3,8])],True),
+            ("alarm",[poke(0xf8,[0,63]),poke(0xb7,32)],True),
+            ("bridge",[poke(0xfa,[23,15])],False),
+        ):
+            _,buffers=case(f"audio-{mode}-priority-{effect}",fixture+setup+resume+dump,
+                           rom_args=("/"+mode,))
+            s=buffers[0]; n=int(effect=="bridge")
+            if mode=="psg":
+                slot=2 if n else 0
+                assert s[slot*8+5]==(0x10 if tone else 0x40) and s[slot*8+6]&1
+                assert all(s[v*8+6]&1 for v in range(4,8)), "Effect stopped the flying engine"
+            else:
+                assert s[0xb8 if tone else 0xb4]&32
+                if tone: assert s[0xc8]&1 and s[0x32]==0x23, "Fuel tone lost its odd harmonic"
+                assert not s[0xbd]&0x3f, "Blast incorrectly uses metallic percussion"
+                if not tone:
+                    assert all(s[0xc0+v]==8 and s[0x20+slot]==0x22 and s[0x40+slot]==16
+                               for v,slot in ((4,9),(5,10),(6,16))), "Blast lost its FM noise body"
+                assert all(s[0xb0+v]&32 for v in range(4)), "Effect stopped the flying engine"
+
+        _,buffers=case(f"audio-{mode}-engine-missile-blast",fixture+resume+[
+            poke(0xfa,[23,15]),"run 2"]+dump,rom_args=("/"+mode,))
+        s=buffers[0]
+        if mode=="psg":
+            assert all(s[n*8+6]&1 for n in (1,2,3,4,5,6,7)), "Engine, shot and blast do not overlap"
+            assert s[13]==0x10 and s[21]==0x40
+        else:
+            assert all(s[0xb0+n]&32 for n in range(8)), "OPL engine, shot and blast do not overlap"
+            assert s[0xc7]&1 and s[0x31]==0x23
+
+        _,buffers=case(f"audio-{mode}-all-voices",fixture+resume+[
+            poke(0xf8,[3,8]),poke(0xfa,[23,15]),"run 2"]+dump,rom_args=("/"+mode,))
+        s=buffers[0]
+        if mode=="psg":
+            assert all(s[n*8+6]&1 for n in range(8)), "An overlapping PSG voice is stopped"
+            assert all(s[n*8+3]>>4<15 for n in range(4)), "An overlapping PSG effect is silent"
+        else:
+            assert all(s[0xb0+n]&32 for n in range(9)), "An overlapping OPL voice is silent"
+
+        engine_statistics={}
+        for name,setup,frames in (
+            ("engine-slow",["press down"],60),
+            ("engine-fast",[poke(0xb5,254),"press up"],60),
+            ("engine-ramp",["press up"],180),
+            ("explosion",[poke(0xf8,[1,31]),poke(0xc6,254)],32),
+            ("missile",[poke(0xfb,15)],20),
+            ("overlap",[poke(0xfa,[23,15])],24),
+            ("all-voices",[poke(0xf8,[3,8]),poke(0xfa,[23,15])],8),
+        ):
+            commands=fixture+[poke(0xf8,[0]*4)]+resume+setup+meta
+            for frame in range(frames):
+                if name=="engine-ramp" and frame in (60,120):
+                    commands += ["release up","press down"] if frame==60 else ["release down","press up"]
+                commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),"run 1"]+dump+meta
+            _,buffers=case(f"audio-{mode}-capture-{name}",commands,rom_args=("/"+mode,))
+            if mode=="psg":
+                previous_ticks,previous_rng=struct.unpack('<HH',buffers[2])
+                captured=buffers[3:]; buffers=captured[::4]; trace=[]
+                for s,latch,control,state in zip(captured[::4],captured[1::4],captured[2::4],captured[3::4]):
+                    ticks,rng=struct.unpack('<HH',state)
+                    delta=(ticks-previous_ticks)&65535
+                    # The first two snapshots straddle the idle-to-flight
+                    # retune and a change in the main-loop publish position.
+                    assert delta<=(75 if len(trace)<2 else 52), "Noise IRQ runs beyond its requested clock"
+                    trace.append(dict(label=name,seconds=1/60,psg=list(s),engine_noise=dict(
+                        start_rng=previous_rng,end_rng=rng,ticks=delta,
+                        clock_hz=8000000/(int.from_bytes(latch,'little')+2),
+                        active=bool(control[0]),level=control[1])))
+                    previous_ticks,previous_rng=ticks,rng
+            else:
+                trace=[dict(label=name,seconds=1/60,opl2=list(s)) for s in buffers]
+            (output/f"audio-{mode}-{name}.json").write_text(json.dumps(trace),encoding="utf-8")
+            if name in ("engine-slow","engine-fast"):
+                engine_statistics[name]=sum(e['engine_noise']['clock_hz'] for e in trace)/len(trace) if mode=="psg" else \
+                    sum(pitch(e['opl2'],n) for e in trace for n in range(4))/(len(trace)*4)
+            if name=="missile":
+                pitches=[]
+                for s in buffers:
+                    active=s[14]&1 if mode=="psg" else s[0xb7]&32
+                    if active:
+                        pitches.append(struct.unpack_from("<H",s,8)[0]/3 if mode=="psg" else pitch(s,7))
+                assert len(pitches)>=16 and 330<pitches[0]<430 and 170<pitches[-1]<260
+                assert all(a>b for a,b in zip(pitches,pitches[1:])), "Missile does not descend smoothly"
+            if mode=="opl2" and name=="explosion":
+                active=[s for s in buffers if s[0xb4]&32]
+                assert len(active)>=24, "Blast cut off its native decay"
+                early=sum(pitch(s,n) for s in active[:8] for n in range(4,7))/24
+                late=sum(pitch(s,n) for s in active[-8:] for n in range(4,7))/24
+                assert early>late*1.5, "Blast noise bandwidth does not fall during decay"
+                assert active[0][0x4c]<active[-1][0x4c], "Blast does not fade out"
+        assert engine_statistics['engine-fast']>engine_statistics['engine-slow']*2.4, "Insufficient average engine clock change"
+        case("audio-"+mode+"-frame-budget",start+[
+            "press up space","run 1200","release up space","run 2"],rom_args=("/"+mode,))
+        case("audio-"+mode+"-exit",start+["press escape","expect-exit 0 120"],rom_args=("/"+mode,))
+        if mode=="psg":
+            state_dump=[f'dump 0x{sym["engine_frame"]:04x} 4']
+            _,states=case("audio-psg-clock-pause",fixture+state_dump+["run 60"]+state_dump+
+                resume+["run 12"]+state_dump+["press p","run 3","release p","run 3"]+
+                state_dump+["run 60"]+state_dump,rom_args=("/psg",))
+            assert states[0]==states[1] and states[3]==states[4], "Noise timer did not stop during pause"
+            assert states[2]!=states[1], "Noise timer did not resume"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
+    parser.add_argument("--audio-only",action="store_true")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")
@@ -243,7 +488,7 @@ def main():
     output.mkdir(exist_ok=True)
     count = 0
 
-    def case(name, commands, fill="random", gameplay=True):
+    def case(name, commands, fill="random", gameplay=True,rom_args=()):
         nonlocal count
         # Allow the next loop to account for the last rendered frame, including
         # full resets/respawns. The exit case has already returned to the OS.
@@ -255,6 +500,7 @@ def main():
             str(args.emulator.resolve()), str(build / "riverraid.rp6502"),
             "--script", str(script), "--mute", "--phi2", "8000", "--seed", "42",
             "--fill", fill, "--save-dir", str(output / "save"),
+            "--",*rom_args,
         ], cwd=ROOT, text=True, capture_output=True, timeout=60)
         # Some emulator releases report a script error with exit code zero.
         if process.returncode or "rp6502-emu:" in process.stderr:
@@ -267,7 +513,7 @@ def main():
 
     dismiss_cover = ["wait xram:0x00b0 2 180", "press z", "run 3", "release z",
                      "wait xram:0x00b0 0 120"]
-    title = dismiss_cover + ["wait xram:0x0080 82 240", "run 2", "peek xram:0x0080 0x52 3 3"]
+    title = dismiss_cover + ["wait xram:0x0080 82 240", "wait xram:0x00b2 32 90", "run 2", "peek xram:0x0080 0x52 3 3"]
     boot = title + [f'wait 0x{sym["ready"]:04x} 2 180', "run 60",
                     "peek xram:0x0080 0x52 3 3"]
     start = boot + ["press space", "run 140", "release space", "run 4",
@@ -281,6 +527,24 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    if args.audio_only:
+        run_audio_checks(case,sym,fixture,resume,start,output)
+        print(f"All {count} audio checks passed.",flush=True)
+        return
+
+    # The native SELECT number belongs in GAME, not in P1/P2 or HI.
+    # Check actual score pointers and the rendered record across both modes.
+    zero_score = bytes([88]*5+[0])
+    zero_record = tuple(0x9e00+n*32 for n in (11,11,11,11,11,0))
+    initial_scores = ["dump 0xcd 12", "dump 0xdd 12", "dump xram:0x0600 90"]
+    _, buffers = case("scores-start-at-zero", boot + initial_scores + [
+        "press f2", "run 3", "release f2", "run 3", "peek 0x80 1"] + initial_scores + [
+        "press f2", "run 3", "release f2", "run 3", "peek 0x80 0"] + initial_scores)
+    for current, other, sprites in zip(buffers[::3],buffers[1::3],buffers[2::3]):
+        assert current[::2] == other[::2] == zero_score, "P1/P2 inherited the GAME number"
+        record = tuple(struct.unpack_from("<H",sprites,i*10+4)[0] for i in range(3,9))
+        assert record == zero_record, "HI inherited the GAME number"
 
     # Cover pixels and RGB555 endpoints are checked directly against the BMP,
     # not just the converter's output. Check every displayed fade step and
@@ -383,32 +647,40 @@ def main():
 
     footer=(build / "demo_footer.bin").read_bytes()
     width=len(footer)//8
-    # Synchronize with the first displayed scene, rather than ROM loading.
-    # Check the last delayed frame and the first caption/demo frame together.
-    _, buffers=case("demo-startup-delay",title+[
-        "dump xram:0x0260 14", "dump xram:0x0200 16",
-        "run 175", f'wait 0x{sym["demo_wait"]:04x} 1 8', "peek xram:0x0262 0 0",
-        f'peek 0x{sym["ready"]:04x} 1', "dump xram:0x0200 16",
-        f'wait 0x{sym["ready"]:04x} 2 3', "run 2",
-        "dump xram:0x0260 14", "dump xram:0x0200 16",
-        "run 120", "dump xram:0x0200 16", "peek 0xc6 0",
-        "dump xram:0x0080 32", "peek xram:0x0302 0 255"])
-    caption_before,river_before,river_last,caption_after,river_after,river_later,state=buffers
-    assert struct.unpack_from("<h",caption_before,2)[0]==0
-    assert river_before==river_last, "River moved before the demo started"
-    assert struct.unpack_from("<h",caption_after,2)[0]<0
-    assert river_after!=river_later, "Demo did not scroll the river"
-    assert state[2]==3 and state[4]==0 and score(state)==1, "Demo changed player lives/score"
+    # Every palette fades from black, preserving RGB555 transparency. Snapshot
+    # colors are independent of the generated levels, including full brightness.
+    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4))
+    palette_dump=[f"dump xram:0x{address:04x} {size}" for address,size in palette_ranges]
+    commands=dismiss_cover+["wait xram:0x0080 82 240", "wait xram:0x00b2 0 10",
+        "run 1", "dump xram:0xd000 576", "dump xram:0x0200 16"]+palette_dump+[
+        f'shot "{(output / "game-fade-black.png").as_posix()}"']
+    for level in range(1,33):
+        commands += [f"wait xram:0x00b2 {level} 3", "dump xram:0x00b3 1"]+palette_dump
+        if level in (16,32):
+            commands += [f'shot "{(output / f"game-fade-{level}.png").as_posix()}"']
+    commands += ["dump xram:0x0200 16", f'wait 0x{sym["ready"]:04x} 2 3', "run 3",
+        "dump xram:0x0260 14", "run 120", "dump xram:0x0200 16"]
+    _, buffers=case("game-fade-all-palettes",commands)
+    original,river_before=buffers[:2]
+    words=struct.unpack("<288H",original)
+    times=[]
+    for level in range(33):
+        offset=2 if level==0 else 7+(level-1)*6
+        if level:
+            times.append(buffers[offset][0]); offset+=1
+        actual=b"".join(buffers[offset:offset+5])
+        expected=struct.pack("<288H",*((c&32)|((c&31)*level//32)|
+            ((((c>>6)&31)*level//32)<<6)|((((c>>11)&31)*level//32)<<11) for c in words))
+        assert actual==expected, f"Game palette fade mismatch at level {level}"
+    assert all((b-a)&255==2 for a,b in zip(times,times[1:])), "Fade step is not two VSYNCs"
+    river_last,caption,river_later=buffers[-3:]
+    assert river_last==river_before, "Scene moved during fade"
+    assert struct.unpack_from("<h",caption,2)[0]<0, "Caption did not start after fade"
+    assert river_last!=river_later, "Demo did not start after fade"
 
-    case("demo-start-before-delay",title+["press space", "run 140", "release space",
-        "run 4", f'peek 0x{sym["ready"]:04x} 0', "peek xram:0x0082 1",
-        "peek xram:0x0084 3 1"])
-
-    _, buffers=case("demo-startup-pause",title+["press p", "run 3", "release p", "run 3",
-        f'dump 0x{sym["demo_wait"]:04x} 1', "mark", "run 180", "expect-same",
-        f'dump 0x{sym["demo_wait"]:04x} 1']+resume+[
-        f'wait 0x{sym["ready"]:04x} 2 180', "run 3", "peek 0xc6 0"])
-    assert buffers[0]==buffers[1], "Pause did not stop the startup countdown"
+    case("game-start-during-fade",dismiss_cover+["wait xram:0x00b2 8 240",
+        "press space", "run 140", "release space", "run 4",
+        f'peek 0x{sym["ready"]:04x} 0', "peek xram:0x0082 1", "peek xram:0x0084 3 1"])
 
     _, buffers=case("demo-footer-scroll",boot+["dump xram:0x0260 14", "run 60",
         "dump xram:0x0260 14",f"dump xram:0x3800 {len(footer)}",
@@ -529,14 +801,16 @@ def main():
                 "dump xram:0x0300 100", "dump xram:0x0200 16", "dump xram:0x0800 7680"]
         commands += [f'shot "{(output / f"mountains-{scene}.png").as_posix()}"']
     commands += ["dump xram:0x9200 512", "dump xram:0x3600 512", "dump xram:0x5800 512",
-                 "dump xram:0x2700 3136"]
+                 "dump xram:0x5c00 512", "dump xram:0x5e00 512",
+                 "dump xram:0x2700 3744"]
     _, mountain_buffers = case("mountains-stay-on-land", commands)
-    mountain_images = {0x9200:mountain_buffers[-4], 0x3600:mountain_buffers[-3],
-                       0x5800:mountain_buffers[-2]}
+    mountain_images = dict(zip((0x9200,0x3600,0x5800,0x5c00,0x5e00),mountain_buffers[-6:-1]))
     mountain_tiles=mountain_buffers[-1]
     assert 3 in [(p>>shift)&15 for p in mountain_images[0x9200] for shift in (0,4)]
     assert 2 in [(p>>shift)&15 for p in mountain_images[0x3600] for shift in (0,4)]
     assert 3 not in [(p>>shift)&15 for p in mountain_images[0x3600] for shift in (0,4)]
+    assert {1,3} <= {(p>>shift)&15 for p in mountain_images[0x5c00] for shift in (0,4)}
+    assert {1,2,3} <= {(p>>shift)&15 for p in mountain_images[0x5e00] for shift in (0,4)}
     seen_images = set()
     for sample in range(len(mountain_scenes)*2):
         sprites, config, tiles = mountain_buffers[sample*3:sample*3+3]
@@ -571,7 +845,7 @@ def main():
                             f"Mountain covers water: scene {sample//2}, block {block}, pixel {px},{py}"
         assert visible > 100, "Mountain fixture did not display its sprites"
         check_mountains_on_fine_terrain(sprites,config,tiles,mountain_tiles,mountain_images)
-    assert seen_images==set(mountain_images), "Game does not display all three mountain silhouettes"
+    assert seen_images==set(mountain_images), "Game does not display all five mountain silhouettes"
     # The new silhouette has one peak and fits between the old two in area.
     areas={address:sum(bool((p>>shift)&15) for p in image for shift in (0,4))
            for address,image in mountain_images.items()}
@@ -584,7 +858,7 @@ def main():
     # Keep the title's road on screen; the attract river now scrolls it away.
     _, buffers = case("river-bank-contours", title + [
         "press p", "run 3", "release p", "run 3",
-        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x2700 3136",
+        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x2700 3744",
         f'dump 0x{sym["river1"]:04x} 192', f'dump 0x{sym["river2"]:04x} 192',
         f'dump 0x{sym["river_left"]:04x} 192', f'dump 0x{sym["river_right"]:04x} 192',
         f'dump 0x{sym["player_outer_left"]:04x} 192', f'dump 0x{sym["player_outer_right"]:04x} 192',
@@ -598,8 +872,8 @@ def main():
 
     # The tank lettering is three columns of transparent pixels inside its
     # opaque body. Check recognizable glyphs in the actual uploaded 4-bpp image.
-    _, images = case("fuel-lettering", boot + ["dump xram:0x9400 128"])
-    tank = images[-1]
+    _, images = case("fuel-lettering", boot + ["dump xram:0x9400 128","dump xram:0x0540 32"])
+    tank,palette = images
     for letter, top, glyph in (
         ("F", 7, (0b111, 0b100, 0b110, 0b100, 0b100)),
         ("U", 13, (0b101, 0b101, 0b101, 0b111)),
@@ -612,6 +886,22 @@ def main():
                 color = (tank[y*4+x//2] >> (0 if x&1 else 4)) & 15
                 holes = (holes << 1) | (color == 0)
             assert holes == expected, f"Broken {letter} in FUEL, row {y-top}"
+
+    # Lossless 5200 reference: s_RiverRaid_1.png, x=272..303, y=160..207,
+    # sampled at four horizontal / two vertical pixels per logical pixel.
+    # Each letter sits inside its own six-row band, with a full bottom row.
+    reference=(
+        ".MMMMM..", "MM...MM.", "MM.MMMM.", "MM..MMM.", "MM.MMMM.", "MM.MMMM.",
+        "GGGGGGG.", "GG.G.GG.", "GG.G.GG.", "GG.G.GG.", "GG...GG.", "GGGGGGG.",
+        "MM...MM.", "MM.MMMM.", "MM..MMM.", "MM.MMMM.", "MM...MM.", "MMMMMMM.",
+        "GG.GGGG.", "GG.GGGG.", "GG.GGGG.", "GG.GGGG.", "GG...GG.", "GGGGGGG.",
+    )
+    colors={".":0,"M":(15<<11)|(6<<6)|23|32,"G":(22<<11)|(22<<6)|22|32}
+    for y,line in enumerate(("........",)*6+reference+("........",)*2):
+        for x,pixel in enumerate(line):
+            index=(tank[y*4+x//2]>>(0 if x&1 else 4))&15
+            actual=struct.unpack_from("<H",palette,index*2)[0] if index else 0
+            assert actual==colors[pixel], f"FUEL letter/band alignment differs at {x},{y}"
 
     _, jet_buffers = case("jet-bitmap", pause + ["dump 0xba 2","dump 0xc000 4096","dump xram:0x9600 80"])
     pointer,native,jet=jet_buffers
@@ -642,6 +932,8 @@ def main():
         "press down", "run 12", "release down"] + dump)
     assert states[1][26] > states[0][26] and states[2][26] < states[1][26]
 
+    run_audio_checks(case,sym,fixture,resume,start,output)
+
     _, states = case("exact-fuel-burn", fixture + ["run 1"] + dump + resume + dump)
     elapsed = int.from_bytes(states[1][14:16], "little")-int.from_bytes(states[0][14:16], "little")
     assert int.from_bytes(states[0][6:8], "little")-int.from_bytes(states[1][6:8], "little") == elapsed*32
@@ -658,8 +950,8 @@ def main():
         poke(0xb9, 1), poke(0xbc, 12), poke(0x88, [12, 0]), poke(0xc6, 0),
         "press p", "run 35", "release p", "run 1", "press p", "run 3",
         "release p", "run 3", "dump 0xa0 6", "dump xram:0x0300 100",
-        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x9000 512",
-        "dump xram:0x2700 3136", f'dump 0x{sym["river1"]:04x} 192',
+        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x6000 768",
+        "dump xram:0x2700 3744", f'dump 0x{sym["river1"]:04x} 192',
         f'dump 0x{sym["river2"]:04x} 192',
         f'dump 0x{sym["river_left"]:04x} 192', f'dump 0x{sym["river_right"]:04x} 192',
         f'shot "{(output / "bridge.png").as_posix()}"'])
@@ -678,9 +970,30 @@ def main():
     water = [i*4+p for i, tile in enumerate(terrain[row_offset:row_offset+40])
              if tile == 1 for p in range(4)]
     assert water == list(range(64, 96)), "Original road has unexpected bank positions"
-    assert (x, x+screen_width) == (water[0]*2, (water[-1]+1)*2), "Bridge misses a river bank"
+    assert (x, x+screen_width) == ((water[0]-8)*2, (water[-1]+9)*2), \
+        "Bridge deck must cover both banks symmetrically"
     body = bridge[12*image_width//2:13*image_width//2]
     assert all((pixel >> 4) and (pixel & 15) for pixel in body), "Gap in bridge deck"
+
+    _, images=case("bridge-5200-structure",boot+[
+        "dump xram:0x6000 768","dump xram:0x0500 32","dump xram:0x0100 32"])
+    image,palette,ground_palette=images
+    assert struct.unpack_from("<H",ground_palette,18)[0]==(11<<11)|(11<<6)|11|32, \
+        "Upper approach must use the reference gray shade"
+    beams=("R","D","L","L","D","D","Y","Y","L","L","D","D","L","L","R")
+    reference=["."*48]*8+[c*48 for c in beams]+[
+        "."*12+"K"*6+"."*12+"K"*6+"."*12]*2+["."*48]*7
+    colors={".":0,"R":(13,2,0),"D":(10,6,0),"L":(14,10,0),"Y":(21,17,5),"K":(0,0,0)}
+    for row,line in enumerate(reference):
+        for column,pixel in enumerate(line):
+            index=(image[row*24+column//2]>>(0 if column&1 else 4))&15
+            actual=struct.unpack_from("<H",palette,index*2)[0] if index else 0
+            expected=0 if pixel=="." else (colors[pixel][2]<<11)|(colors[pixel][1]<<6)|colors[pixel][0]|32
+            assert actual==expected, f"Bridge beam/support differs at {column},{row}"
+    # Sample an approach far from the river: stripe and bridge centers align.
+    for row,expected_index in enumerate((4,4,4,9,9,9,9,9,6,6,5,5,5,5,5,5,4,4,4,4),6):
+        tile=terrain[((y+row-terrain_y)%192)*40+4]
+        assert tiles[tile*32]&15==expected_index, f"Road stripe differs at row {row}"
 
     road_scene = (output / "bridge-bank-alignment.script").read_text(encoding="utf-8").splitlines()
     road_scene = road_scene[:road_scene.index("dump 0xa0 6")]
@@ -690,7 +1003,7 @@ def main():
 
     # F5 selects straight missiles, so guidance cannot pull a missed shot
     # back into the bridge on a later frame.
-    for missile_x, expected in ((63, 0), (95, 500)):
+    for missile_x, expected in ((55, 0), (56, 500), (103, 500), (104, 0)):
         _, states = case(f"bridge-edge-{missile_x}", fixture + clear_score +
             object_at(1, 8, 63) + [poke(0xb2, 43), poke(0xf5, missile_x),
                 "press f5", "run 2", "release f5", "run 2"] + resume + dump)
@@ -862,6 +1175,32 @@ def main():
     def tank_at(block, x):
         return [poke(sym["tanks"]+block*5, [x,0,1,0,0])]
 
+    # Bridge companions enter from either screen edge, with the mirrored
+    # sprite's three padding columns kept outside its visible 9-pixel body.
+    for direction in (0,1):
+        _, buffers = case(f"bridge-tank-edge-entry-{direction}", fixture +
+            object_at(2,8,63) + [poke(0xbd,1),poke(0xa8,0),poke(0xae,1^direction),
+            poke(sym["tanks"],[0]*30),"run 3",f'dump 0x{sym["tanks"]+10:04x} 5',
+            "dump xram:0x0378 10","run 60",f'dump 0x{sym["tanks"]+10:04x} 5'] +
+            resume + ["run 20",f'dump 0x{sym["tanks"]+10:04x} 5'])
+        initial,sprite,paused_tank,moving = buffers
+        x = 160 if direction else -9
+        assert struct.unpack_from("<h",initial)[0] == x and initial[2:4] == bytes([1,direction])
+        assert initial == paused_tank, "Entering bridge tank moves while paused"
+        sprite_x, sprite_y = struct.unpack_from("<hh",sprite)
+        assert sprite_x == x*2-direction*6 and sprite_y == 93
+        assert bool(sprite[9]&16) == bool(direction)
+        moved_x = struct.unpack_from("<h",moving)[0]
+        assert (0 < x-moved_x < 20 if direction else 0 < moved_x-x < 20)
+        assert moving[3] == direction, "Entering bridge tank reversed before crossing the screen"
+
+    for direction,x in ((0,128),(1,24)):
+        state = list(struct.pack("<hBBB",x,1,direction,0))
+        _, buffers = case(f"bridge-tank-past-old-turn-{direction}", fixture +
+            object_at(2,8,63) + [poke(sym["tanks"]+10,state)] + resume +
+            [f'dump 0x{sym["tanks"]+10:04x} 5'])
+        assert buffers[0][3] == direction, "Bridge tank turned around inside the screen"
+
     for x, points in ((40,250),(76,750)):
         _, states = case(f"tank-score-{points}", fixture + clear_score + object_at(1,8,63) +
             tank_at(1,x) + [poke(0xb2,45),poke(0xf5,x+3)] + resume + dump + ["dump 0xa1 1"])
@@ -891,7 +1230,7 @@ def main():
     initial, paused_tanks, moving, restarted = buffers
     assert initial[120:130] == paused_tanks[120:130], "Tank moves while paused"
     x0,y0,image0,_,_,_ = struct.unpack_from("<hhHHBB",initial,120)
-    assert image0 in (0x9d80,0xbf00) and y0==93
+    assert image0 in (0x9d80,0xbf00,0xbfa0) and y0==93
     assert struct.unpack_from("<h",moving,120)[0] != x0, "Tank does not drive"
     assert all(struct.unpack_from("<h",restarted,(10+n)*10+2)[0]==-256 for n in range(6)), \
         "Restart retained road tanks"
@@ -901,7 +1240,7 @@ def main():
         "dump 0xa0 6",f'dump 0x{sym["tanks"]:04x} 30',"dump xram:0x0300 160"])
     ids, tanks, sprites = buffers
     assert ids[1]==8 and tanks[5+2]==1 and 54<=struct.unpack_from("<h",tanks,5)[0]<=58
-    assert struct.unpack_from("<H",sprites,110+4)[0] in (0x9d80,0xbf00)
+    assert struct.unpack_from("<H",sprites,110+4)[0] in (0x9d80,0xbf00,0xbfa0)
 
     # Shoreline tanks are independent of bridge tanks. A controlled 40..120
     # corridor lets both banks and the safe-round / dangerous-splash rule be
@@ -919,18 +1258,45 @@ def main():
         return [poke(sym["bank_tanks"],list(struct.pack("<hhh7B",
             x,y,shot_x,side,1,90 if phase else 0,phase,target,timer,0)))]
 
-    # Both 9x9 drawings are packed into 12x16 storage. Padding must remain
+    # Track the actual sprite relative to its scrolling tank, in both
+    # directions: barrel-height launch, falling flight, then track-height impact.
+    for side in (0,1):
+        commands = bank_fixture + bank_at(x=122 if side else 29,side=side,
+            phase=1,shot_x=116 if side else 36,target=60 if side else 92) + [
+            poke(0xb5,0),poke(0x8c,0),"run 3",
+            f'dump 0x{sym["bank_tanks"]:04x} 13',"dump xram:0x03aa 10"] + resume
+        for frame in range(32):
+            commands += ["run 1",f'dump 0x{sym["bank_tanks"]:04x} 13',"dump xram:0x03aa 10"]
+        _, samples = case(f"bank-round-falling-{side}",commands)
+        heights=[]; impacts=0
+        for state,sprite in zip(samples[::2],samples[1::2]):
+            tank_y=struct.unpack_from("<h",state,2)[0]
+            sprite_y=struct.unpack_from("<h",sprite,2)[0]
+            if state[9]==1:
+                assert struct.unpack_from("<H",sprite,4)[0]==0xbe00
+                assert struct.unpack_from("<H",sprite,6)[0]==0xbf80
+                height=sprite_y+1-21-tank_y
+                assert 9<=height<=16, "Round leaves the barrel/track height interval"
+                heights.append(height)
+            elif state[9]==2 and sprite_y!=-256:
+                assert sprite_y+8-21-tank_y==16, "Splash does not meet the bottom track line"
+                impacts+=1
+        assert heights[0]==9 and heights==sorted(heights), "Round does not descend from the barrel"
+        assert heights[-1]>=15 and len(set(heights))>=5 and impacts, "Missing gradual descent/impact"
+
+    # All three 9x9 drawings are packed into 12x16 storage. Padding must remain
     # transparent, mirrored storage must not move the visible tank, and the
     # ninth column must collide in both directions.
     _, buffers=case("bank-tank-wider-bitmaps",bank_fixture + bank_at(x=29) + [
         poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",122,80,0,1,1,90,0,0,0,122))),
-        "run 3","dump xram:0x9d80 96","dump xram:0xbf00 96",
+        "run 3","dump xram:0x9d80 96","dump xram:0xbf00 96","dump xram:0xbfa0 96",
         "dump xram:0x03a0 40"])
-    a,b,descriptors=buffers
-    assert a[:36]==b[:36] and a[54:]==b[54:], "Track animation changes the body"
-    assert a[36:54]!=b[36:54], "Track animation frames are identical"
-    assert all((p>>shift)&15 in (0,1) for p in a+b for shift in (0,4)), "Tank has non-black ink"
-    for image in (a,b):
+    a,b,c,descriptors=buffers
+    assert a[:36]==b[:36]==c[:36] and a[54:]==b[54:]==c[54:], "Track animation changes the body"
+    assert len({a[36:54],b[36:54],c[36:54]})==3, "Track animation frames are identical"
+    assert any(c[42:48]) and not any(a[42:48]+b[42:48]), "Third phase lost its middle-row links"
+    assert all((p>>shift)&15 in (0,1) for p in a+b+c for shift in (0,4)), "Tank has non-black ink"
+    for image in (a,b,c):
         lit=[(x,y) for y in range(16) for x in range(12)
             if (image[y*6+x//2]>>(0 if x&1 else 4))&15]
         assert max(x for x,y in lit)==8 and max(y for x,y in lit)==8
@@ -938,6 +1304,38 @@ def main():
         sx,sy,_,_,size,options=struct.unpack_from("<hhHHBB",descriptors,slot*10)
         assert size==0x32 and bool(options&16)==bool(side)
         assert sx==(119 if side else 29)*2 and sy==21+(80 if side else 40)+8
+
+    commands=bank_fixture+object_at(2,8,63)+tank_at(2,40)+bank_at(x=30,y=40)+[
+        poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",122,80,0,1,1,90,0,0,0,122)))]+resume+[poke(0x82,12)]
+    for _ in range(32):
+        commands += ["run 1","dump xram:0x0300 200"]
+    commands += ["press p","run 3","release p","run 3","dump xram:0x0300 200",
+                 "run 30","dump xram:0x0300 200"]
+    _,buffers=case("tank-three-track-phases",commands)
+    phases=[]
+    for descriptors in buffers[:32]:
+        addresses=[struct.unpack_from("<H",descriptors,slot*10+4)[0] for slot in (12,16,18)]
+        assert len(set(addresses))==1, "Road and bank tanks use different track phases"
+        phases.append(addresses[0])
+    sequence=(0x9d80,0xbf00,0xbfa0)
+    assert set(phases)==set(sequence), "Not all three track phases are shown"
+    changes=[i for i in range(1,len(phases)) if phases[i]!=phases[i-1]]
+    assert len(changes)>=6 and all(b-a==4 for a,b in zip(changes,changes[1:])), "Uneven track cadence at native counter wrap"
+    assert all(phases[i]==sequence[(sequence.index(phases[i-1])+1)%3] for i in changes), "Track cycle skips or reverses a phase"
+    assert all(buffers[-2][slot*10:slot*10+10]==buffers[-1][slot*10:slot*10+10]
+               for slot in (12,16,18)), "Pause did not freeze track animation"
+
+    # The missile starts on the middle track row, below the body. At the
+    # outside column only phase 2 has ink in its remaining eight-row path.
+    for side in (0,1):
+        for phase,hits in ((0,False),(2,True)):
+            x=122 if side else 29
+            _,states=case(f"tank-track-middle-hit-{side}-{phase}",
+                bank_fixture+bank_at(x=x,y=96,side=side)+[
+                    poke(sym["tank_track_phase"],phase),poke(0x82,7),"run 3",
+                    poke(0xb2,42),poke(0xf5,x),"press p","run 1",
+                    f'dump 0x{sym["bank_tanks"]:04x} 13'])
+            assert (states[0][7]==2)==hits, "Collision does not match the current track links"
     for side in (0,1):
         for column,hits in ((8,True),(9,False)):
             x=122 if side else 29
@@ -956,10 +1354,10 @@ def main():
         if shape.startswith("island"):
             left=[20]*192; right=[60]*192
         if "bend" in shape:
-            for y in range(41,57):
-                left[y]+=y-41
+            for y in range(48,64):
+                left[y]+=y-48
                 if shape.startswith("island"):
-                    right[y]-=(y-41)//2
+                    right[y]-=(y-48)//2
         if shape=="narrow":
             right=[44]*192
         if shape=="closed":
@@ -982,7 +1380,7 @@ def main():
                 assert state[9] in (1,2), "Tank did not fire into available water"
                 assert struct.unpack_from("<h",state,2)[0]==40, "Fixture scrolled"
                 target=state[10]; targets.add(target)
-                for y in range(41,57):
+                for y in range(48,64):
                     for x in range(target,target+8):
                         mx=x if x<80 else 159-x
                         assert left[y]<=mx<right[y], \
@@ -1000,18 +1398,18 @@ def main():
         tank_state, descriptors = buffers
         assert struct.unpack_from("<h",tank_state)[0] == (122 if side else 29)
         assert tank_state[7]==1 and tank_state[9] in (1,2), "Tank did not fire at water"
-        assert struct.unpack_from("<H",descriptors,4)[0] in (0x9d80,0xbf00)
+        assert struct.unpack_from("<H",descriptors,4)[0] in (0x9d80,0xbf00,0xbfa0)
         assert struct.unpack_from("<H",descriptors,14)[0] in (0xbe00,0xbe30,0xbe70,0xbeb0)
         if tank_state[9]==1:
             y=struct.unpack_from("<h",tank_state,2)[0]
-            assert struct.unpack_from("<h",descriptors,12)[0]+1==21+y+9, \
-                "Tank round is not aligned with its barrel"
+            height=struct.unpack_from("<h",descriptors,12)[0]+1-21-y
+            assert 9<=height<=16, "Tank round leaves the barrel/track height interval"
 
     case("bank-round-crosses-jet-safely", bank_fixture +
         bank_at(x=30,y=134,phase=1,shot_x=76,target=110) + resume + [
         "peek xram:0x0082 1"])
     case("bank-splash-crashes-jet", bank_fixture +
-        bank_at(x=30,y=134,phase=2,shot_x=76,target=76,timer=18) + resume + [
+        bank_at(x=30,y=129,phase=2,shot_x=76,target=76,timer=18) + resume + [
         "peek xram:0x0082 2"])
     # Native death freezes extension ticks. Every enemy projectile must be
     # hidden immediately, whether death came from a splash or from the bank.
@@ -1091,7 +1489,7 @@ def main():
 
     # The tank's round consumes fuel without awarding the player's 80 points
     # or consuming a player missile. A shot through transparent padding misses.
-    for tank_y, destroys in ((96,True),(71,False)):
+    for tank_y, destroys in ((96,True),(92,True),(91,False),(116,False),(71,False)):
         _, buffers = case(f"bank-round-fuel-{tank_y}", bank_fixture + clear_score +
             object_at(1,10,56) + bank_at(x=30,y=tank_y,phase=1,shot_x=58,target=110) +
             [poke(0xb2,0),poke(0xf5,110)] + resume + dump + ["dump 0xa1 1"])
@@ -1100,13 +1498,14 @@ def main():
         assert buffers[0][8], "Enemy fire consumed the player's missile"
 
     _, buffers = case("bank-round-fuel-at-impact", bank_fixture + clear_score +
-        object_at(1,10,94) + bank_at(x=30,y=96,phase=1,shot_x=88,target=90) +
+        object_at(1,10,94) + bank_at(x=30,y=90,phase=1,shot_x=88,target=90) +
         resume + dump + ["dump 0xa1 1"])
     assert score(buffers[0])==0 and buffers[1][0]!=10, \
         "A round touching FUEL at its water impact must destroy the depot"
     _, buffers = case("bank-splash-expires", bank_fixture +
         bank_at(x=30,y=134,phase=2,shot_x=45,target=45,timer=18) + resume + [
-        "run 14",f'dump 0x{sym["bank_tanks"]:04x} 13',"peek xram:0x0082 1"])
+        f'wait 0x{sym["bank_tanks"]+9:04x} 0 60',
+        f'dump 0x{sym["bank_tanks"]:04x} 13',"peek xram:0x0082 1"])
     assert buffers[-1][9]==0, "Expired splash remains dangerous"
 
     _, buffers = case("bank-tank-score", bank_fixture + clear_score +
@@ -1127,13 +1526,13 @@ def main():
         poke(sym["bank_tanks"],[0]*26)] + bank_at(x=-8,y=20) + [
         poke(sym["bank_tanks"]+13,list(struct.pack("<hhh7B",160,0,0,1,1,0,0,0,0,0)))] +
         resume + ["run 110", "dump xram:0x03a0 40", "dump xram:0x0200 16",
-        "dump xram:0x0800 7680", "dump xram:0x2700 3136", "dump xram:0x9d80 96",
+        "dump xram:0x0800 7680", "dump xram:0x2700 3744", "dump xram:0x9d80 96",
         f'shot "{(output / "bank-tanks.png").as_posix()}"'])
     sprites, config, terrain, tiles, image = buffers
     origin_y=struct.unpack_from("<h",config,4)[0]
     for sprite in (0,2):
         sx,sy,address,_,_,options=struct.unpack_from("<hhHHBB",sprites,sprite*10)
-        assert address in (0x9d80,0xbf00) and sy!=-256, "Bank tank is not visible"
+        assert address in (0x9d80,0xbf00,0xbfa0) and sy!=-256, "Bank tank is not visible"
         for y in range(16):
             if not 21<=sy+y<181:
                 continue
@@ -1266,12 +1665,27 @@ def main():
              [poke(0xb2,43),poke(0xf5,missile_x),poke(0xb3,plane_x)] + resume +
              ["peek xram:0x0082 1","peek xram:0x0088 0"])
 
-    for hard in (False, True):
-        commands = fixture + [poke(0xb2,50), poke(0xf5,40), poke(0xb3,90)]
-        if hard:
-            commands += ["press f5", "run 2", "release f5", "run 2"]
-        _, states = case("straight-missile" if hard else "guided-missile", commands + resume + dump)
-        assert states[-1][9] == (40 if hard else 95)
+    _, switches = case("function-key-mapping", fixture + ["dump 0x0282 1",
+        "press f4", "run 3", "release f4", "run 3", "dump 0x0282 1",
+        "press f5", "run 3", "dump 0x0282 1", "run 60", "dump 0x0282 1",
+        "release f5", "run 3",
+        "press f6", "run 3", "dump 0x0282 1", "run 60", "dump 0x0282 1",
+        "release f6", "run 3", "press f5", "run 3", "release f5", "run 3",
+        "dump 0x0282 1", "press f6", "run 3", "release f6", "run 3",
+        "dump 0x0282 1", "peek xram:0x008b 1"])
+    assert [state[0] for state in switches] == [0x0b,0x0b,0x4b,0x4b,0xcb,0xcb,0x8b,0x0b], \
+        "F5/F6 must toggle P1/P2 guidance independently once per press; F4 must remain inactive"
+
+    for player in (0,1):
+        key = "f6" if player else "f5"
+        for hard in (False, True):
+            commands = fixture + [poke(0xf4,player),poke(0x80,player),
+                poke(0xb2,50),poke(0xf5,40),poke(0xb3,90)]
+            if hard:
+                commands += [f"press {key}","run 2",f"release {key}","run 2"]
+            _, states = case(("straight-missile" if hard else "guided-missile")+f"-p{player+1}",
+                             commands + resume + dump)
+            assert states[-1][9] == (40 if hard else 95)
 
     two = boot + ["press f2", "run 2", "release f2", "run 2", "peek 0x80 1",
                   "press space", "run 140", "release space", "run 4", "peek xram:0x0082 1",
@@ -1287,21 +1701,23 @@ def main():
         "peek xram:0x0082 1", "peek xram:0x0084 3 1", "press escape", "expect-exit 0 120"])
     _, buffers = case("scroll-and-performance", start + ["press up space", "run 1200",
         "release up space", "run 4"] + dump + [
-        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x2700 3136",
+        "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x2700 3744",
         f'dump 0x{sym["river1"]:04x} 192', f'dump 0x{sym["river2"]:04x} 192',
         f'dump 0x{sym["river_left"]:04x} 192', f'dump 0x{sym["river_right"]:04x} 192',
         f'dump 0x{sym["player_outer_left"]:04x} 192', f'dump 0x{sym["player_outer_right"]:04x} 192',
         f'dump 0x{sym["player_island_left"]:04x} 192', f'dump 0x{sym["player_island_right"]:04x} 192',
         "dump xram:0x0300 100", "dump xram:0x9200 512", "dump xram:0x3600 512", "dump xram:0x5800 512",
+        "dump xram:0x5c00 512", "dump xram:0x5e00 512",
         f'shot "{(output / "gameplay.png").as_posix()}"'])
-    state,config,terrain,tiles,p1,p2,left,right,outer_left,outer_right,island_left,island_right,sprites,large,small,medium=buffers
+    state,config,terrain,tiles,p1,p2,left,right,outer_left,outer_right,island_left,island_right,sprites,large,small,medium,stepped,wide=buffers
     assert int.from_bytes(state[30:32], "little") == 0, "Skipped VSYNC at 8 MHz"
     assert state[5] >= 2
     check_terrain_pixels(config,terrain,tiles,p1,p2,left,right)
     check_player_ground(config,terrain,tiles,outer_left,outer_right,island_left,island_right)
     check_bank_contours(config,terrain,tiles,require_features=False)
     check_bank_angle(config,terrain,tiles,p1,p2)
-    check_mountains_on_fine_terrain(sprites,config,terrain,tiles,{0x9200:large,0x3600:small,0x5800:medium})
+    check_mountains_on_fine_terrain(sprites,config,terrain,tiles,
+                                  {0x9200:large,0x3600:small,0x5800:medium,0x5c00:stepped,0x5e00:wide})
     # A restart and palette change can redraw terrain, score, fuel and logo
     # together. Exercise that combination after some gameplay, repeatedly.
     commands = start + ["press up space", "run 600", "release up space", "run 4"]

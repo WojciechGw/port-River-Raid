@@ -1,23 +1,30 @@
 River Raid - Picocomputer 6502 port with native original game rules.
 Original game: Activision (1982), designer Carol Shaw.
 Reference disassembly and annotations: Thomas Jentzsch.
-The cover fades in at startup. Press any key to fade out and enter the game.
-The scrolling caption and attract demo start together after 3 seconds.
 
-Player 1: arrows, Space/Enter. Player 2: WASD, left Ctrl.
+Run:
+load riverraid.rp6502 [/auto | /psg | /opl2 | /pcm]
+
+Sound options:
+No option: OPL2. /auto: PCM if supported, otherwise OPL2.
+Only /pcm requires the PCM firmware extension. /help shows usage.
+
+Keyboard:
+Player 1: arrows, Space/Enter. Player 2: W A S D, left Ctrl.
 In single-player mode, both keyboard layouts work.
-F1: color/B&W. F2: select one/two players.
-F3: start at BRIDGE 1 -> 5 -> 20 -> 50 -> 1.
-F5/F4: toggle guided/straight missiles for player 1/2.
-Space or Enter: fire / start. P: pause. R: restart at selected bridge. Escape: exit.
+F1: color/B&W.                       F2: select one/two players.
+F3: start at bridge 1->5->20->50->1. F4: no function.
+F5 / F6: Player 1 / 2 fire&forget or guided missiles.
+Space or Enter: fire / start.        P: pause.
+R: restart at selected bridge.       Escape: exit.
 Two gamepads: D-pad or left stick, face buttons to fire,
 Start to pause, Select to restart.
-Fly over fuel tanks to refuel. Destroy the bridge to finish a section.
-Balloon: 60 points. Road tank: 250. Bridge: 500. Bridge with tank: 750.
+Fly over fuel tanks to re fuel. Destroy the bridge to finish a section.
+Scoring:
+Ship 30pts, Helicopter 60pts, Balloon 60pts, Fuel 80pts,
+Road Tank 250pts, Bridge 500pts, Bridge with Tank 750pts.
 
 Credits:
-Carol Shaw
-Thomas Jentzsch
-Wojciech Gwiozdzik with AI Codex GPT-6.1 Sol High
+Carol Shaw, Thomas Jentzsch, Wojciech Gwiozdzik with AI Codex GPT-6.1 Sol High
 
 Have fun!

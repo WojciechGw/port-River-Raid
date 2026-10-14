@@ -85,7 +85,8 @@ def generate(source):
                1244: 'CPY    #ID_BRIDGE', 1246: 'LDA    frameCnt',
                1415: 'CMP    #ID_BRIDGE', 1574: 'LDA    ScoreTab,Y',
                2132: 'LDY    EnemyIdTab,X', 2133: '.newFuel:',
-               2250: 'LDA    InitTab,X', 1409: '.checkCollisions:'}
+               2250: 'LDA    InitTab,X', 1409: '.checkCollisions:',
+               317: 'LDA    #<One', 1830: 'ADC    #DIGIT_H'}
     raw_lines = source.splitlines()
     for number, expected in anchors.items():
         if not raw_lines[number-1].strip().startswith(expected):
@@ -159,6 +160,12 @@ def generate(source):
             continue  # TXS would destroy the C caller return address.
         if number == 306:
             code = "BPL local_root_loopClear"
+        if number == 317:
+            # GAME has its own HUD field; the startup score must stay zero.
+            code = "LDA #<Zero"
+        if number == 1830:
+            # SELECT formerly put the game number (1/2) in both scores.
+            code = "LDA #<Zero"
         if number == 1810:
             code = "LDX #$77"  # RESET clears $F7-$FF, preserving game selection.
         if number == 1805:

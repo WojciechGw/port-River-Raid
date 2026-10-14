@@ -34,14 +34,16 @@ restarting with R. Full initialization applies the selected level, while
 respawning and player switching preserve each player's current section.
 In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
-image remains unchanged. Missile guidance is now toggled with F5/F4.
+image remains unchanged. Missile guidance is toggled independently with
+F5 for player 1 and F6 for player 2. F4 has no game function.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
 they replace some randomly generated enemies, moving and bouncing off the
 banks like helicopters. Shooting a balloon awards 60 points; contact with
 the plane causes an explosion.
 A tank is an additional object in every bridge block, starting with the
-first bridge. It drives along the road and turns around at its ends. Its
+first bridge. It starts fully outside the left or right playfield edge, drives
+along the entire road, and turns around only after clearing the opposite edge. Its
 state moves with the terrain block, pause stops its movement, and restarting
 or respawning restores its state. A tank on the land portion of the road
 awards 250 points; hitting a bridge with a tank on its span destroys both
@@ -58,6 +60,10 @@ the decorative brown rims. The whole largest impact circle must fit across
 all sixteen of its rows, including bends. An island confines fire to the
 tank's own channel; tanks wait when the channel cannot contain the circle.
 Shot ranges use a separate random state, preserving the native course generator.
+White rounds leave at barrel height and descend gradually to the bottom track
+line at their chosen range. Rendering and FUEL collisions share the current
+flight height; splash rendering, collisions and water bounds use the final
+track height. The flight drop is calculated once per tick and cached.
 Rounds in flight do not harm the plane; only opaque splash pixels damage it,
 matching the distinction in the 5200 manual. Shooting a bank tank awards
 250 points through the same native scoring routine as a road tank.
@@ -68,9 +74,9 @@ pixels can collide with the jet; clear phases have no sprite or collision.
 Tank rounds can destroy FUEL depots: the depot enters the native explosion
 animation and plays its explosion sound, without awarding player points or
 consuming the player's own missile. Transparent depot pixels do not stop a round.
-Both road and bank tanks alternate two track frames every fourth native
+Both road and bank tanks cycle through three track frames every fourth native
 frame, at half the helicopter rotor cadence. Pause freezes the animation.
-The turret and body remain fixed; separated black wheels alternate positions.
+The turret and body remain fixed; the third phase adds offset middle-row links.
 Tank collisions follow the opaque pixels of the current track frame.
 The readable tank drawing is 9 logical pixels wide and 9 rows high; each
 logical column occupies two canvas pixels. Its VGA sprite is padded to 12x16
@@ -123,7 +129,7 @@ table. The Atari raster code is not executed. There is no Atari CPU emulation.
 
 VGA uses a 320×240 canvas, with the playfield on scanlines 21–180 and logical
 coordinates of 160×160. The river uses the original PF0/PF1/PF2 bit order,
-mirroring, and road tables. A 40×192 ring buffer stores indices of 8×1-pixel
+mirroring, and bridge openings. A 40×192 ring buffer stores indices of 8×1-pixel
 tiles: one tile corresponds to one Atari playfield bit. Only new scanlines
 are written, transferring 40 rather than 160 bytes per row.
 Tiles at the land/water boundary add a brown rim on the land side, including
@@ -156,7 +162,16 @@ the island. `mask_player_land` checks only these intervals and the original
 terrain masks; a collision occurs only when an opaque pixel of the plane
 reaches the ground. Resetting and scrolling update the same boundaries.
 Sprites reproduce the A/B streams, row colors, TIA sizes, mirroring, bridge
-explosion copies, and plane wrapping at the edges. The player's plane occupies
+explosion copies, and plane wrapping at the edges. Bridges use the 5200 beam
+profile in `src/graphics.h`: a 15-row brown deck with a gold center stripe,
+followed by two rows of black supports. The deck is 48 logical pixels wide
+and overlaps each bank by eight pixels around the original 32-pixel opening.
+Its opaque pixels also define missile and plane collisions. The approach
+road has 20 rows, different gray shades above and below its pale center line,
+and shares the bridge's stripe position. Its additional tiles use XRAM below
+the small mountain; the static Activision bitmap now occupies $5A00.
+Startup sprite conversion stays optimized in Debug to fit the fixed RAM map.
+The player's plane occupies
 the front VGA layer (plane 2), above game objects on plane 1.
 The panel displays digit, fuel, and Activision lettering bitmaps rather than
 the VGA font. The score and HI use bold 6×6 digits reconstructed from Atari
@@ -168,10 +183,13 @@ Field positions follow the supplied layout: GAME on the left, the fuel gauge
 beside it, and BRIDGE above the reserve icons. The fuel gauge frame with E,
 F, and 1/2 is a readable 39×16 bitmap in `src/graphics.h`; the yellow indicator
 depends on the current fuel level.
-Three mountain variants replace the house and tree from the 2600 version.
+Five mountain variants replace the house and tree from the 2600 version.
 Two were reconstructed from `original/Atari XL/image0.png`: a tall mountain
 range with blue slopes and lower brown peaks with black ridges. The third is
-a single medium-sized mountain with a black ridge. The variant depends on
+a single medium-sized mountain with a black ridge. Two additional user-supplied
+references define stepped peaks with blue cuts and a wide overlapping range
+with blue and black ridges. Their images occupy $5C00 and $5E00 in XRAM.
+The variant depends on
 the object data and remains the same when it moves between terrain blocks.
 Mountain placement considers the shared strip of land across the full bitmap
 height and neighboring interpolation rows, including those outside the
@@ -184,7 +202,9 @@ The panel reproduces the 5200 layout: P1/P2 and the score on the left, HI and
 the high score on the right, GAME, fuel, and BRIDGE below, and reserve planes
 under the bridge number. The session high score is shared by both players
 and survives R/game restarts; the number of reserve icons matches the original
-game counter and can reach nine.
+game counter and can reach nine. Scores start at zero; startup and SELECT no
+longer copy the game number into the score's units digit. GAME displays the
+selection separately, so the initial HI stays zero until points are earned.
 Counter digits and icons are prepared at startup; sprites update only the
 image or number, without redrawing bitmaps during a game frame.
 Stream A occupies even rows of a block and B occupies odd rows; this order
@@ -235,11 +255,18 @@ asset, and game initialization restores the remaining assets in the reused XRAM.
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
-After the first game screen is displayed, a 180-VSYNC counter (3 seconds)
-holds the caption and demo. Both start in the same frame. The demo runs the
+After the cover closes, `src/fade.c` and `src/fade.asm` fade in the entire
+game screen over 64 VSYNCs (about one second). All 288 palette entries are
+saved in XRAM $D000 and scaled into staging at $D300. Each RGB555 channel
+uses 32 brightness steps, preserving the transparency bit. Palettes start
+black before video planes are enabled; each update is copied at VSYNC in
+about 0.8 ms at 8 MHz, before the playfield is scanned. The scene remains
+stationary during the fade. XRAM $00B2 reports brightness (0..32), followed
+by the last publication's VSYNC byte. The scratch buffers do not overlap
+the PCM ring or OPL2 registers. Once the fade finishes, the caption and demo
+start in the same frame, without a countdown. The demo runs the
 original terrain generator and enemy movement; it skips plane controls,
-firing, fuel consumption, and player collisions. Pause also stops the
-startup countdown.
+firing, fuel consumption, and player collisions.
 The typeface reproduces the bold 6×6 letters from Atari XL/5200 samples,
 in cells eight logical pixels wide; the wider "w" occupies seven columns,
 and an additional row accommodates lowercase descenders.
@@ -271,7 +298,7 @@ Restarting restores the initial straight corridor with a fast assembly
 routine. In Release measurements at 8 MHz, terrain restoration time fell
 from about 391 ms to 5–6 ms. The panel transfers only the columns occupied
 by digits, fuel, and the logo; glyph rendering is handled in assembly, and
-PSG frequencies use tables prepared at startup instead of division in each
+Audio phase increments use constant tables instead of division in each
 frame. Player switching updates only the plane palette; a full palette
 update is still needed when changing the color mode or screensaver state.
 The bank renderer uses fixed working buffers, reducing cc65 stack access
@@ -280,9 +307,104 @@ TIA color conversion and expansion of the plane bitmap to 4bpp are handled
 in assembly. This reduces the cost of a frame combining a restart, panel
 redraw, and palette change, without changing the plane pixels or colors.
 
-The PSG receives frequencies, volumes, and waveform types derived from the
-original AUDC/AUDF/AUDV registers. Effect sequences come from the original
-game, but PSG noise does not exactly reproduce the TIA polynomial generators.
+Audio follows the supplied Atari XL/XE recording `RiverRaid.wav`. Original
+AUDC/AUDF/AUDV registers select engine, refueling, low-fuel alarm, missile
+and explosion effects. `src/audio.c` supplies shared parameters for three
+backends; `src/audio.asm` implements the PCM sample producer and a compact
+OPL register uploader.
+
+The `/psg`, `/opl2` and `/pcm` load parameters force a backend.
+No parameter selects OPL2. `/auto` selects PCM if available, otherwise OPL2. Explicit
+`/pcm` fails with a message on unsupported firmware. Arguments are case
+insensitive, with the last audio option taking precedence; `/help` and `/?`
+show usage. Unknown options exit with status 2 before displaying the cover.
+For the emulator, use `rp6502-emu.exe riverraid.rp6502 -- /opl2`.
+The SDK's optional `__argv_mem` allocator uses the existing 512-byte
+`reset_tiles` buffer. Arguments are parsed before cover/video initialization
+reuses that buffer, avoiding a heap allocation and a permanent argv buffer.
+
+PSG uses all eight oscillators. The engine is signed binary polynomial noise
+with a variable sample clock, approximately 1000 Hz when slow and 3000 Hz when
+fast. Four stationary PSG waves form positive/negative level outputs for the
+current and previous sample. Their sum supplies a two-tap average to soften
+the noise. Timer 1 of the built-in 65C22 VIA updates their volume registers in
+`src/engine.asm`; it saves and restores the RIA portal and CPU registers, uses
+private state and never calls C or the OS inside the IRQ. The timer scales to
+PHI2 and stops during pause, attract mode and death. Exiting restores the IRQ
+vector and VIA control settings. This uses the standard PSG interface and
+does not require PCM firmware. The native PSG noise waveform randomizes at
+audio sample rate, so changing its oscillator frequency alone would not
+provide the required noise bandwidth control.
+The other four voices carry the native effect, missile, bridge noise and blast
+bass layer. Their waveforms and sequences are retained. Extra attenuation
+leaves mixing headroom when several effects overlap, keeping the engine audible.
+
+OPL2 uses all nine melodic channels. Four engine channels use deep FM without
+feedback, a 3:1 modulator/carrier ratio and independent dither in overlapping
+bands. The lower oscillator octave packs the sidebands more closely for a
+smoother noise texture. Frequency follows the full speed accumulator over an
+almost 3:1 range, with 0.095 Hz register resolution in the engine bands.
+Three separate blast channels use a deeper 2:1 FM ratio; their noise bandwidth
+falls with the native volume decay, from the initial impact into a low rumble.
+No cymbal/hi-hat rhythm voices
+are used. Missile and refueling/alarm
+each have a separate channel, with additive fundamental and third harmonic
+components for a square-like tone. Total-level attenuation maps native linear
+volume to the YM3812's 0.75 dB steps. An assembly routine writes only changed
+frequency, key and level registers, keeping the nine-voice update within the
+Release frame budget. Audio has its own RNG and leaves course generation unchanged.
+OPL2 remains an approximation of POKEY: its noise-like spectrum comes from FM
+rather than the original audio-rate polynomial. FFT and Haar wavelet
+measurements of the XL/XE recording guide bandwidth and treble balance.
+Wavelets analyze the reference offline; the chip uses its fixed waveforms.
+
+PCM uses two procedural voices at 8 kHz signed mono. The engine has a
+17-bit polynomial clocked according to throttle. A two-sample average and
+the PCM mixer's interpolation soften upper harmonics. The death burst uses
+a 2 kHz polynomial clock and retains the native half-second volume decay.
+The PCM header is at XRAM `$C000`, with a 2048-byte ring at `$C008`. OPL2
+reuses the `$C000` page only when PCM is not selected. CPU RAM `$C000`
+still holds the original data ROM; these are separate address spaces.
+The cover temporarily occupies this XRAM range, so audio initializes after
+cover and graphics preparation. Two silent pages prime the PCM stream.
+Each frame prepares at most 160 samples, publishing only complete 256-byte
+pages through an atomic high-byte write. The queue target includes 512
+prepared samples. The loop uses zero page below `$80`, leaves the native
+game RNG untouched and rounds clocks to 31.25 Hz steps (15.625 Hz tones).
+Only PCM requires the firmware extension `XREG(0,1,2,base)`. PSG/OPL2 use
+the standard [RIA sound interfaces](https://picocomputer.github.io/ria.html#yamaha-opl2-fm-sound-generator).
+
+All backends preserve refueling/alarm sequences. Missiles descend from
+about 400 to 200 Hz over 18 frames (0.3 seconds). PSG and OPL2 keep the engine,
+missile, blast and fuel tone on separate voices, so they can play together.
+PCM retains its two-voice priority: bridge explosions override missiles.
+Death cancels the engine and missile tail. Pause and attract mode suppress
+all voices. Explicit PSG/OPL2 initialization stops any PCM stream, and exiting
+releases the selected sound device.
+
+The emulator checks export `audio-psg-*.json` and `audio-opl2-*.json`
+register traces, plus actual CPU-generated PCM in `checks/audio/*-cpu.wav`.
+`tools/preview_synth.py` renders PSG traces using the offline model.
+PSG traces also contain a coherent frame snapshot of the noise IRQ's seed and
+tick count. The preview reconstructs the binary sequence and spreads those
+ticks evenly inside each frame; it does not reproduce individual bus-write times.
+The `engine-ramp` captures use actual throttle input: acceleration, deceleration
+and acceleration again, rather than changing the speed register between clips.
+OPL traces additionally require a native library built from
+`tools/opl_preview.c` and the firmware's MIT-licensed emu8950 source:
+`--opl-library path/to/opl-preview.dll`. The model uses the firmware's gain
+and clamp. These previews are not recordings from the host sound device
+or physical hardware and omit analogue filtering.
+`tools/analyze_audio.py` reports FFT spectra and Haar detail energy using
+only the Python standard library. The supplied recording remains external.
+After rendering the traces, `tools/compare_synth.py --previews build/audio-v2`
+checks engine bandwidth, throttle response, excessive treble, fixed-tone
+dominance and clipping, including all voices playing together. Short-window
+OPL spectra also check for moving tones hidden by whole-clip averaging. Add
+`--reference path/to/RiverRaid.wav` to produce `reference-vs-synth.wav`:
+each group contains the XL/XE reference, PSG model and OPL2 model, with matched
+RMS levels and labels in the adjacent JSON file. Spectral agreement is a
+measurement aid; perceived similarity still needs listening.
 RGB555 approximates the colors of the supplied screenshots rather than
 modeling the analog behavior of a particular television.
 The hardware interfaces are described in the [VGA](https://picocomputer.github.io/vga.html)
@@ -329,7 +451,13 @@ the banks, continuity of the brown contour at bends, and the rim crossing
 the road. The other scenarios that end in gameplay also check for skipped
 VSYNCs, including respawning, refueling, and player switching. The optional
 frame-phase profiler is described in `tests/README.md`.
-The tests are muted, so they do not verify sound quality.
+Audio tests check PCM registration, throttle response, effect/alarm priority,
+pause and attract-mode silence. They export actual CPU-generated samples,
+check ring wrap and publication, and simulate 8 kHz consumption while scrolling
+and firing. Additional PSG/OPL2 scenarios use real load arguments, check engine
+pitch/texture, priorities, pause/demo silence, exit and 1200-frame budgets.
+Argument tests cover backend selection, uppercase options, help and errors.
+Muted tests do not verify listening quality or real hardware timing.
 
 Listening tests, frame-by-frame raster comparisons with an Atari emulator,
 and testing on physical RP6502 hardware remain outstanding. Game logic
