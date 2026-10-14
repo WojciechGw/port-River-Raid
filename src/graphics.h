@@ -142,6 +142,18 @@ static const char tank_blast_pixels[8][9]={
     ".E.EE.E.",
     "...EE..."
 };
+/* Native enemy plane, top to bottom at block rows 14..19. X = opaque,
+ * . = transparent. Keep palette slots 7..9 for the native two-row bands;
+ * colors below run from the bottom band to the top band. */
+static const char enemy_plane_pixels[6][9]={
+    "X.......",
+    "XX...XX.",
+    "XXXXXXXX",
+    ".X..XXXX",
+    "..XXX...",
+    "..XX...."
+};
+static const uint8_t enemy_plane_colors[3]={0xac,0x9c,0x8c};
 /* Reference helicopters facing right. B = black tail, G = dark green,
  * R = salmon rotor, D = dark blue fuselage stripe. In the firing variant
  * B and D use olive instead. IDs 5/6 still select the two rotor frames. */

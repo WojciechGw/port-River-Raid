@@ -507,8 +507,10 @@ static void prepare_images(void)
              * Reversing these pairs breaks the negative-space FUEL lettering.
              * FUEL spans 24 rows: four six-row color bands. Keep its bottom
              * gray row below L (j=2), which other sprites do not use. */
-            bits=(id==7 || j<(id==10 ? 2 : 3) || j>=26) ? 0 :
+            bits=(id==4 || id==7 || j<(id==10 ? 2 : 3) || j>=26) ? 0 :
                 G(0xce00+(uint8_t)((j&1 ? rr_shapePtr1bTab[id] : rr_shapePtr1aTab[id])+(j>>1)));
+            if (id==4 && y>=14 && y<20)
+                for (x=0;x<8;++x) if (enemy_plane_pixels[y-14][x]=='X') bits|=0x80>>x;
             if (id==7 && y>=16 && y<24)
                 for (x=0;x<8;++x) if (ship_pixels[y-16][x]=='X') bits|=0x80>>x;
             if (id==9) {
@@ -521,7 +523,7 @@ static void prepare_images(void)
                         break;
                     }
             }
-            if (id!=7 && j<26) sprite_colors[id][(j>>1)+1]=G(0xcf00+(uint8_t)(rr_ColorPtrTab[id]+(j>>1)));
+            if (id!=4 && id!=7 && j<26) sprite_colors[id][(j>>1)+1]=G(0xcf00+(uint8_t)(rr_ColorPtrTab[id]+(j>>1)));
             if (id==8) {
                 j=y>=8 && y<25 ? bridge_rows[y-8] : 0;
                 bits=j==5 ? 0x24 : j ? 255 : 0;
@@ -545,6 +547,7 @@ static void prepare_images(void)
                 upload(EXTRA_IMAGES+(uint16_t)id*256+y*8,row,8);
             }
         }
+        if (id==4) memcpy(sprite_colors[id]+7,enemy_plane_colors,sizeof(enemy_plane_colors));
         if (id==9) {sprite_colors[id][1]=0x20; sprite_colors[id][2]=0; sprite_colors[id][3]=0x84;}
         if (id==8) memcpy(sprite_colors[id],bridge_colors,sizeof(bridge_colors));
         if (id==7) memcpy(sprite_colors[id],ship_colors,sizeof(ship_colors));
