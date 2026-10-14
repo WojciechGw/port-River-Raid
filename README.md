@@ -99,7 +99,7 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F6 | Player 2: guided or straight missiles |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
-| Escape | Exit to the console |
+| Escape | Farewell screen, then exit to the console |
 
 Two gamepads are supported: the D-pad or left stick controls movement, the
 four face buttons fire, Start pauses, and Select starts a new game. Flying
@@ -118,6 +118,9 @@ A small white "PRESS ANY KEY" message blinks below the image, visible for half
 a second and hidden for half a second. The cover and its palettes are named
 assets in the `.rp6502` file, loaded from `ROM:cover.bin` and `ROM:cover-fade.bin`;
 the message bitmap is loaded from `ROM:cover-prompt.bin`.
+Escape displays the same image with a fade in and the white message
+"SEE YOU NEXT TIME!". After three seconds at full brightness, the image fades
+out completely before the program exits. Held keys do not interrupt this screen.
 The entire game screen fades in from black over about one second, including
 the river, objects, HUD and logo. The scrolling caption and demo start together
 as soon as the fade finishes, without an additional delay.

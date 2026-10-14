@@ -13,6 +13,11 @@ Scenariusze `cover-*` porównują bitmapę z `assets/cover.bmp`, sprawdzają
 wszystkie poziomy palety fade in/out oraz zachowanie okładki podczas
 oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
 i napisu oraz brak automatycznego wczytywania okładki do XRAM.
+`outro-fades-hold-and-exit` sprawdza ten sam obraz po Esc, wszystkie poziomy
+obu fade, napis SEE YOU NEXT TIME!, pełne 180 klatek i wyjście dopiero po czerni.
+Test utrzymuje Esc i inne klawisze; napis pozostaje nieruchomy i nie miga.
+`outro-*-held-escape` sprawdzają wyjście z pokazu i z gry oraz zatrzymanie
+wszystkich trzech backendów dźwięku przed ponownym użyciem pamięci okładki.
 `audio-*` wymagają emulatora z rozszerzeniem PCM (`XREG(0,1,2,base)`).
 Sprawdzają format 8 kHz mono, reakcję silnika na gaz, priorytet wybuchu,
 tankowania i alarmu, pauzę oraz ciszę w trybie pokazowym. Test strumienia

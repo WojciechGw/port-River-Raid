@@ -466,7 +466,7 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
         assert engine_statistics['engine-fast']>engine_statistics['engine-slow']*2.4, "Insufficient average engine clock change"
         case("audio-"+mode+"-frame-budget",start+[
             "press up space","run 1200","release up space","run 2"],rom_args=("/"+mode,))
-        case("audio-"+mode+"-exit",start+["press escape","expect-exit 0 120"],rom_args=("/"+mode,))
+        case("audio-"+mode+"-exit",start+["press escape","expect-exit 0 480"],rom_args=("/"+mode,))
         if mode=="psg":
             state_dump=[f'dump 0x{sym["engine_frame"]:04x} 4']
             _,states=case("audio-psg-clock-pause",fixture+state_dump+["run 60"]+state_dump+
@@ -565,6 +565,7 @@ def main():
     assert assets["cover.bin"]==expected_pixels
     assert assets["cover-fade.bin"]==(build / "cover_fade.bin").read_bytes()
     assert assets["cover-prompt.bin"]==(build / "cover_prompt.bin").read_bytes()
+    assert assets["outro-prompt.bin"]==(build / "outro_prompt.bin").read_bytes()
     assert not any(0x11000<=a<0x1f100 for a in rom.data), "Cover was preloaded to XRAM"
 
     def cover_palette(level):
@@ -625,6 +626,40 @@ def main():
         case(f"cover-wait-fill-{fill}",["wait xram:0x00b0 2 180", "run 2", "mark",
             "run 120", "expect-same", "peek xram:0x00b0 2", "peek xram:0x00b1 63"],
             fill=fill,gameplay=False)
+
+    # Exit reuses the cover and both fades, holds the farewell for exactly
+    # 180 VSYNCs, and ignores held keys until it has displayed a black frame.
+    commands = pause + ["press escape", "wait xram:0x00b0 1 90",
+                        "peek xram:0x02a4 0 255"]
+    for level in range(1,64):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+    commands += ["wait xram:0x00b0 2 3", "wait xram:0x02a4 222 3",
+        "dump xram:0x0280 14", "dump xram:0x1000 57600",
+        "dump xram:0x02a0 14", "dump xram:0x0900 112", "dump xram:0x0850 4",
+        "press space f3 p", "run 2", "mark",
+        f'shot "{(output / "outro-full.png").as_posix()}"',
+        "run 177", "expect-same", "peek xram:0x00b0 2", "peek xram:0x00b1 63",
+        "peek xram:0x02a4 222 0", "run 1", "peek xram:0x00b0 3",
+        "peek xram:0x02a4 0 255"]
+    for level in reversed(range(64)):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+        if level==32:
+            commands += [f'shot "{(output / "outro-half.png").as_posix()}"']
+    commands += ["wait xram:0x00b0 4 3",
+        f'shot "{(output / "outro-black.png").as_posix()}"', "expect-exit 0 5"]
+    _, buffers = case("outro-fades-hold-and-exit",commands,gameplay=False)
+    assert buffers[:63]==[cover_palette(i) for i in range(1,64)], "Outro fade in differs from the cover"
+    config,pixels,message_config,message,message_palette=buffers[63:68]
+    assert struct.unpack("<BBhhhhHH",config)==(0,0,0,30,320,180,0x1000,0x0400)
+    assert pixels==expected_pixels, "Outro does not display the startup image"
+    assert struct.unpack("<BBhhhhHH",message_config)==(0,0,104,222,112,8,0x0900,0x0850)
+    assert message==assets["outro-prompt.bin"] and any(message) and not any(message[-14:])
+    assert message_palette==struct.pack("<HH",32,0xffff), "Farewell text is not white on black"
+    assert buffers[68:]==[cover_palette(i) for i in reversed(range(64))], "Outro fade out differs from the cover"
+    for backend in ("opl2","psg","pcm"):
+        case(f"outro-{backend}-held-escape",start+["press escape","expect-exit 0 480"],
+             rom_args=("/"+backend,),gameplay=False)
+    case("outro-attract-held-escape",boot+["press escape","expect-exit 0 480"],gameplay=False)
 
     # Staging must not alter the live VGA descriptors until the next VSYNC.
     # The renderer then prepares the following frame; it must not overwrite
@@ -1698,7 +1733,7 @@ def main():
     # Copyright0 ($59) marks the last jet: no reserve jet remains.
     case("game-over-restart-exit", fixture + [poke(0xc0,89), poke(0xb3,4)] + resume + [
         "wait 0xc6 255 300", "press space", "run 140", "release space", "run 4",
-        "peek xram:0x0082 1", "peek xram:0x0084 3 1", "press escape", "expect-exit 0 120"])
+        "peek xram:0x0082 1", "peek xram:0x0084 3 1", "press escape", "expect-exit 0 480"])
     _, buffers = case("scroll-and-performance", start + ["press up space", "run 1200",
         "release up space", "run 4"] + dump + [
         "dump xram:0x0200 16", "dump xram:0x0800 7680", "dump xram:0x2700 3744",

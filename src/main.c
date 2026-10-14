@@ -53,6 +53,7 @@ void rr_tank_crash(void);
 void demo_tick(void);
 void present_frame(void);
 void show_cover(void);
+void show_outro(void);
 void game_fade_prepare(void);
 void game_fade_in(void);
 void __fastcall__ write_terrain_row(unsigned address);
@@ -1538,6 +1539,8 @@ int main(int argc,char** argv)
 #endif
     }
     audio_stop();
+    xreg(1,0,0,1);
+    show_outro();
     xreg(0,0,0,0xffff); xreg(0,0,2,0xffff); xreg(1,0,0,0);
     return 0;
 }

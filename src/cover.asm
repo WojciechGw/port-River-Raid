@@ -1,10 +1,10 @@
-; Startup image uses XRAM before any game assets are prepared. This code lives
-; above the reference ROM, leaving the tightly packed game RAM/stack intact.
+; Cover uses XRAM before game startup and after audio stops on exit.
+; Shared helpers live above the reference ROM to preserve game RAM/stack space.
 .include "rp6502.inc"
 .include "cover.inc"
 .macpack longbranch
 .importzp ptr1
-.export _show_cover
+.export _show_cover, _show_outro
 .segment "SPLASH"
 
 COVER_CONFIG  = $0280
@@ -13,9 +13,11 @@ COVER_STAGING = $0600
 COVER_IMAGE   = $1000
 COVER_PROMPT_CONFIG  = $02A0
 COVER_PROMPT_IMAGE   = $0800
+OUTRO_PROMPT_IMAGE   = $0900
 COVER_PROMPT_PALETTE = $0850
 COVER_PROMPT_Y       = 222
 COVER_BLINK_FRAMES   = 30   ; Half a second on, half a second off, at 60 Hz
+OUTRO_HOLD_FRAMES    = 180  ; Three seconds at 60 Hz
 COVER_STATE   = $00B0         ; 1 fade in, 2 wait, 3 fade out, 4 black, 0 game
 COVER_LEVEL   = COVER_STATE+1 ; 0..63, observable by emulator checks
 
@@ -48,7 +50,16 @@ COVER_LEVEL   = COVER_STATE+1 ; 0..63, observable by emulator checks
     jne boot_error
 .endmacro
 
+.segment "CODE"
+_show_outro:
+    lda #1
+    sta boot_outro
+    jmp boot_show
+.segment "SPLASH"
 _show_cover:
+    lda #0
+    sta boot_outro
+boot_show:
     lda #$ff
     sta boot_fd+1
     lda #1
@@ -65,8 +76,15 @@ _show_cover:
     boot_read COVER_IMAGE, COVER_HALF_BYTES
     boot_read COVER_IMAGE+COVER_HALF_BYTES, COVER_HALF_BYTES
     jsr boot_close
+    lda boot_outro
+    beq @startup_prompt
+    boot_open_file outro_path
+    boot_read OUTRO_PROMPT_IMAGE, OUTRO_PROMPT_BYTES
+    jmp @prompt_loaded
+@startup_prompt:
     boot_open_file prompt_path
     boot_read COVER_PROMPT_IMAGE, COVER_PROMPT_BYTES
+@prompt_loaded:
     jsr boot_close
     boot_address RIA_ADDR0, COVER_PROMPT_PALETTE
     lda #$20                ; Opaque black background, opaque white letters
@@ -94,6 +112,10 @@ _show_cover:
     ldy #0
 @prompt_config:
     lda prompt_config,y
+    ldx boot_outro
+    beq @write_prompt_config
+    lda outro_config,y
+@write_prompt_config:
     sta RIA_RW0
     iny
     cpy #14
@@ -119,6 +141,20 @@ _show_cover:
     bne @fade_in
     lda #2
     jsr boot_state
+    lda boot_outro
+    beq @startup_wait
+    lda #OUTRO_HOLD_FRAMES
+    sta boot_blink
+    lda #1
+    sta boot_prompt_visible
+    jsr boot_vsync
+    jsr boot_prompt
+@outro_wait:
+    jsr boot_vsync
+    dec boot_blink
+    bne @outro_wait
+    jmp @dismiss
+@startup_wait:
     lda #COVER_BLINK_FRAMES
     sta boot_blink
     lda #1
@@ -152,6 +188,12 @@ _show_cover:
     bpl @fade_out
     lda #4
     jsr boot_state
+    lda boot_outro
+    beq @release_key
+    ; Show a completely black frame, then return even if Escape is held.
+    jsr boot_vsync
+    jsr boot_close
+    rts
     ; Display the last black frame and consume the dismissal key completely.
     ; Holding Space/F3/P/Escape must not also start/change/pause/exit the game.
 @release_key:
@@ -308,9 +350,17 @@ boot_level:  .byte 0
 boot_keys:   .byte 0
 boot_blink:  .byte 0
 boot_prompt_visible: .byte 0
+boot_outro: .byte 0
 
 .assert COVER_IMAGE+2*COVER_HALF_BYTES <= $10000, error, "Cover exceeds XRAM"
 .assert COVER_FADE_FRAMES <= 128, error, "Fade counter range"
 .assert DEMO_ASSET_BYTES <= $2000, error, "Demo footer overlaps mountain"
 .assert COVER_PROMPT_IMAGE+COVER_PROMPT_BYTES <= COVER_PROMPT_PALETTE, error, "Prompt overlaps palette"
 .assert COVER_PROMPT_PALETTE+4 <= COVER_IMAGE, error, "Prompt overlaps cover"
+.assert OUTRO_PROMPT_IMAGE+OUTRO_PROMPT_BYTES <= COVER_IMAGE, error, "Outro prompt overlaps cover"
+
+.segment "RODATA"
+outro_config:
+    .byte 0,0
+    .word (320-OUTRO_PROMPT_WIDTH)/2,$ff00,OUTRO_PROMPT_WIDTH,8,OUTRO_PROMPT_IMAGE,COVER_PROMPT_PALETTE
+outro_path: .asciiz "ROM:outro-prompt.bin"

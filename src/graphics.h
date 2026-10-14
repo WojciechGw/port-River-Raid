@@ -129,7 +129,7 @@ static const uint8_t ship_colors[16]={
 #pragma rodata-name(push, "SPLASH")
 static const char tank_shell_pixels[3][9]={
     "........",
-    "..WWWW..",
+    "..WWW...",
     "........"
 };
 static const char tank_blast_pixels[8][9]={

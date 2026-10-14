@@ -33,18 +33,19 @@ typedef struct {
 #define XRAM_STATE 0x0080
 /* Optional RIVER_PROFILE maxima; see tests/README.md. */
 #define XRAM_TIMING 0x00A0
-/* Startup-only state: phase (0 game, 1 in, 2 wait, 3 out, 4 black), level 0..63.
+/* Cover/outro state: phase (0 game, 1 in, 2 wait, 3 out, 4 black), level 0..63.
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
- * pixels before game initialization. Game graphics reuse these regions. */
+ * pixels before game initialization and after audio stops on exit. */
 #define XRAM_COVER_STATE 0x00B0
 /* Game fade: level 0 black .. 32 full, then VSYNC; startup-only scratch. */
 #define XRAM_GAME_FADE_LEVEL 0x00B2
 #define XRAM_GAME_FADE_SOURCE 0xD000
 #define XRAM_GAME_FADE_STAGING 0xD300
-/* Startup-only prompt, before the game reuses these XRAM regions. */
+/* Cover/outro text; these regions hold terrain during gameplay. */
 #define XRAM_COVER_PROMPT_CONFIG 0x02A0
 #define XRAM_COVER_PROMPT_IMAGE 0x0800
 #define XRAM_COVER_PROMPT_PALETTE 0x0850
+#define XRAM_OUTRO_PROMPT_IMAGE 0x0900
 #define XRAM_PALETTE 0x0100
 #define XRAM_PSG 0x0180
 /* PCM extension: mono signed 8-bit, 8000 Hz, 2048-byte ring after header.

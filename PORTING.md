@@ -252,6 +252,11 @@ $D000 through $FEFF, after the original ROM and before the reserved I/O page,
 without taking space reserved for the stack or game
 buffers. After fade out, the program restores the footer strip from a ROM
 asset, and game initialization restores the remaining assets in the reused XRAM.
+Escape stops audio before reusing the cover's XRAM and palette for the farewell
+screen. The same fade helper reads `outro-prompt.bin` into $0900 and centers its
+112x8 bitmap at X=104, Y=222. "SEE YOU NEXT TIME!" remains visible for 180 VSYNCs
+after fade in, without blinking or responding to keys. Fade out ends on black;
+one final VSYNC displays it before returning to the console, even with Escape held.
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.

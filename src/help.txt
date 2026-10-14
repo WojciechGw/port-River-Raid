@@ -16,7 +16,7 @@ F1: color/B&W.                       F2: select one/two players.
 F3: start at bridge 1->5->20->50->1. F4: no function.
 F5 / F6: Player 1 / 2 fire&forget or guided missiles.
 Space or Enter: fire / start.        P: pause.
-R: restart at selected bridge.       Escape: exit.
+R: restart at selected bridge.       Escape: farewell screen, then exit.
 Two gamepads: D-pad or left stick, face buttons to fire,
 Start to pause, Select to restart.
 Fly over fuel tanks to re fuel. Destroy the bridge to finish a section.
