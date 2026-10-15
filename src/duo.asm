@@ -2,7 +2,33 @@
 .include "rp6502.inc"
 .export _duo_load, _duo_save, _hud_clear
 .importzp ptr1
+.import _row, _hud_column, _hud_length, _hud_ink, _hud_fill
+.export _duo_fuel_row
 .segment "CODE"
+; Copy GAME 1 artwork and color its background in one pass.
+; hud_fill is the first unfilled column; opaque ink always stays in front.
+_duo_fuel_row:
+    sta ptr1
+    stx ptr1+1
+    ldy _hud_length
+    dey
+    tya
+    clc
+    adc _hud_column
+    tax
+@pixel:
+    lda (ptr1),y
+    cmp #$aa
+    bne @store
+    cpy _hud_fill
+    bcs @store
+    lda _hud_ink
+@store:
+    sta _row,x
+    dex
+    dey
+    bpl @pixel
+    rts
 _duo_load:
     sta ptr1
     stx ptr1+1

@@ -62,6 +62,8 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define XRAM_HUD_SPRITES 0x0600
 #define XRAM_LOGO_PALETTE 0x0700
 #define XRAM_DEMO_FOOTER_PALETTE 0x0720
+#define XRAM_DUO_HUD_P1_PALETTE 0x0740
+#define XRAM_DUO_HUD_P2_PALETTE 0x0760
 #define XRAM_HUD_BLACK_PALETTE 0x05A0
 #define XRAM_TERRAIN 0x0800
 #define XRAM_TILES 0x2700
@@ -76,6 +78,8 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define XRAM_JET_PALETTE 0x0580
 #define XRAM_DUO_PALETTE 0x0584
 #define XRAM_DUO_JETS 0x6300
+#define XRAM_DUO_LIFE_SPRITES 0x6400
+#define DUO_LIFE_SPRITE_COUNT 20
 /* Two packed duo_player_t snapshots, published with the normal diagnostics. */
 #define XRAM_DUO_STATE 0x00C0
 #define XRAM_HUD_BITMAP_CONFIG 0x0240
@@ -144,7 +148,9 @@ _Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_BRIDGE_IMAGE, "Logo overlaps bridge
 _Static_assert(XRAM_BRIDGE_IMAGE + 48 * 32 / 2 <= XRAM_IMAGES, "Bridge overlaps sprites");
 _Static_assert(XRAM_BRIDGE_IMAGE + 48 * 32 / 2 <= XRAM_DUO_JETS, "Bridge overlaps DUO");
 _Static_assert(XRAM_DUO_JETS + 3 * 80 <= XRAM_IMAGES, "DUO overlaps images");
-_Static_assert(XRAM_DUO_STATE + 44 <= XRAM_PALETTE, "DUO state overlaps palette");
+_Static_assert(XRAM_DUO_JETS + 3 * 80 <= XRAM_DUO_LIFE_SPRITES, "DUO planes overlap life sprites");
+_Static_assert(XRAM_DUO_LIFE_SPRITES + DUO_LIFE_SPRITE_COUNT * 10 <= XRAM_IMAGES, "DUO lives overlap images");
+_Static_assert(XRAM_DUO_STATE + 46 <= XRAM_PALETTE, "DUO state overlaps palette");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Mountain overlaps sprites");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_DEMO_FOOTER_IMAGE, "Mountain overlaps demo footer");
 _Static_assert(XRAM_MEDIUM_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Medium mountain overlaps sprites");
@@ -162,6 +168,9 @@ _Static_assert(XRAM_HUD_SPRITES + HUD_SPRITE_COUNT * 10 <= XRAM_LOGO_PALETTE, "H
 _Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_TERRAIN, "Logo palette overlaps terrain");
 _Static_assert(XRAM_LOGO_PALETTE + 14 <= XRAM_DEMO_FOOTER_PALETTE, "Logo overlaps demo palette");
 _Static_assert(XRAM_DEMO_FOOTER_PALETTE + 14 <= XRAM_TERRAIN, "Demo palette overlaps terrain");
+_Static_assert(XRAM_DEMO_FOOTER_PALETTE + 14 <= XRAM_DUO_HUD_P1_PALETTE, "Demo overlaps DUO HUD");
+_Static_assert(XRAM_DUO_HUD_P1_PALETTE + 32 <= XRAM_DUO_HUD_P2_PALETTE, "DUO HUD palettes overlap");
+_Static_assert(XRAM_DUO_HUD_P2_PALETTE + 32 <= XRAM_TERRAIN, "DUO HUD overlaps terrain");
 _Static_assert(XRAM_HUD + HUD_BYTES <= 65536UL, "XRAM overflow");
 _Static_assert(XRAM_HUD + HUD_BYTES <= XRAM_TANK_SHELL, "HUD overlaps tank shell");
 _Static_assert(XRAM_TANK_SHELL + 16 <= XRAM_TANK_BLAST, "Shell overlaps blast");

@@ -223,7 +223,7 @@ są little endian. Dane służą obserwacji, nie sterowaniu grą.
 | 22–23 | Oryginalne sectionBlock i joystick z historią poprzedniej klatki |
 | 24–25 | Stan 16-bitowego LFSR |
 | 26–27 | Oryginalne speedY i gameMode |
-| 28–29 | Wariant gry 0/1, bieżący gracz 0/1 |
+| 28–29 | Wariant gry 0/1/2, bieżący gracz 0/1 |
 | 30–31 | Pominięte VSYNC po początkowej konfiguracji obrazu, łącznie z restartem i odradzaniem |
 
 Każdy przyrost jednostki przewijania korzysta z oryginalnego akumulatora.
@@ -247,3 +247,24 @@ little endian: wejście, kolizje, logika oryginału, teren, rysowanie wraz
 z panelem i dźwiękiem, cała klatka bez oczekiwania na VSYNC.
 Maksima są niezależne i nie należy ich sumować. Profil dodaje koszt
 odczytów zegara; testy płynności wykonujemy z `RIVER_PROFILE=OFF`.
+
+## GAME 3 DUO
+
+`python tests/emulator_checks.py --duo-only` sprawdza osobne sterowanie,
+prędkości, zasoby, punktację i odradzanie, a także wyprzedzanie, kolizje oraz
+pociski na różnych wysokościach. Każdy scenariusz kontroluje licznik
+pominiętych VSYNC przy 8 MHz. Pełny zestaw uruchamia również te scenariusze.
+Testy wspólnej porażki sprawdzają pojedyncze odjęcie życia za samolot,
+restart aktualnego etapu z jego zapisanym stanem generatora, zachowanie
+wyników, pełne paliwo, wyzerowanie przewagi oraz kontynuację z jednym graczem
+bez żyć. Koniec gry następuje dopiero po wyczerpaniu obu pul żyć.
+Testy limitu żyć obejmują premię 9 → 10 i zatrzymanie na 10 dla obu graczy,
+zarówno za zwykłe obiekty, jak i czołgi, oraz utratę samolotu z pełnej puli.
+Ikony żyć są sprawdzane w układzie 5+5 i przy przejściu do GAME 1.
+
+Diagnostyka XRAM `$00C0` zawiera dwa rekordy po **23 bajty**, kolejno P1 i P2:
+pola 0–18 odwzorowują rejestry gracza z `src/duo.asm`, 19 to stan
+(0 wyeliminowany, 1 aktywny, 2 czeka na most, 3 czeka na bezpieczne miejsce),
+20 to licznik eksplozji, 21 to kandydat X odrodzenia, a 22 to ekranowe Y
+samolotu w obszarze rzeki (bez przesunięcia `RIVER_TOP`). Y dotyczy bieżącej
+klatki; prędkość w polu 3 uwzględnia już przyspieszenie do następnego kroku.

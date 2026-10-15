@@ -468,3 +468,64 @@ Listening tests, frame-by-frame raster comparisons with an Atari emulator,
 and testing on physical RP6502 hardware remain outstanding. Game logic
 behavior is preserved by using the original routines; exact visual and
 audio equivalence is not yet claimed.
+
+## GAME 3 DUO flight positions
+
+DUO runs the shared world once, then the native player rules in two separate
+contexts (`src/duo.h`, `src/duo.inc`, `src/duo.asm`). Each context now includes
+its own screen Y. Relative distance accumulates the difference of native
+velocities (speed / 128 logical pixels per step) in a signed fixed-point
+accumulator. Its limit is +/-72 pixels, or four 18-row plane heights.
+The pair starts at Y=106 and moves around that center, remaining within
+Y=70..142. Equal speeds preserve the accumulated lead; reversing the speed
+difference starts closing it immediately, including at the limit.
+The rendered position is the position used for collisions in that step;
+native acceleration takes effect in the following step. A sole survivor
+keeps its altitude and sets the scrolling speed. With both pilots alive,
+world scrolling still uses the mean speed.
+
+Player masks, enemy projectiles, tank splashes, refuelling and mutual plane
+collisions use each pilot's Y. The missile launch hook translates that Y into
+the native absolute missile coordinate, so subsequent throttle changes do not
+move an airborne missile. The first pilot passing a bridge marks it as passed;
+when a pilot is waiting, passage follows the sole survivor. This remains latched
+while that bridge moves through the lower blocks, so changing speed or losing
+the trailing plane cannot count an already passed bridge again.
+Respawns use the survivor's speed and the fallen pilot's last altitude,
+preserving the earned separation and the survivor's position. The spawn
+checks terrain, enemies and the partner at that altitude.
+
+When no plane remains in flight, the explosion runs for 32 ticks before
+restarting the current section if either pilot still has lives. Lives are
+charged only by `duo_kill`, never by the restart. `rr_duo_restart` reuses the
+native death checkpoint selection and partial `GameInit`: it restores the
+section RNG, including rollback of a section generated ahead of the planes,
+without swapping players or resetting scores. The host rebuilds terrain and
+clears tanks and helicopter shots before attempting safe spawns. Both heights
+return to Y=106 with zero relative lead and full fuel. Empty life pools remain
+eliminated; only two empty pools produce game over.
+
+DUO labels, score digits, reserve icons and fuel fills follow their
+pilot's plane color, including the
+black-and-white switch. Dedicated HUD palettes keep BRIDGE and its number
+in the GAME 1 colors. Returning to the classic panel stages its labels and
+sprites separately from the score/fuel bitmap to stay within the frame budget.
+Both DUO fuel gauges share GAME 1's `fuel_gauge`/`fuel_rows` artwork and
+39-by-16 dimensions, at HUD row 10. Their colored fills shrink across the
+37-column interior behind the opaque artwork. An assembly row copier applies
+the fill and mask together. At most one complete gauge is redrawn per frame;
+the second changed value remains pending for the next frame. SELECT completes
+its world reset before the replacement HUD layout begins.
+The GAME and BRIDGE labels start at the fuel gauges' X=4 and X=84, at Y=28.
+DUO reserves use the GAME 1 plane bitmap, with five icons per row at X=44/124
+and a seven-column pitch. The rows start at Y=10 and Y=19, leaving one blank
+scanline between eight-row icons. Twenty sprite records at XRAM $6400 use
+HUD plane 2; only changed visibility coordinates are updated. The DUO bonus
+life limit is ten (encoded as 80); both native scoring and tank bonuses use
+the same limit comparison, while GAME 1/2 keep their original limit of nine.
+
+Eight-column enemy collisions compare bitmap rows directly to keep two
+simultaneous collisions within the frame budget. The readable mountain art
+remains in `src/graphics.h`; `tools/pack_mountains.py` generates the two-bit
+`mountains.h` table at build time (840 instead of 3360 bytes), preserving all
+pixels and providing space for the added DUO code.

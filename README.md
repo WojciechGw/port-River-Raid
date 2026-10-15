@@ -43,6 +43,22 @@ pitch, and explosions have a low body rather than metallic percussion.
 Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
+GAME 3 DUO lets P1 and P2 fly together, with separate scores, fuel and lives.
+Each pilot can hold up to ten lives, shown as two rows of five plane icons
+beside their fuel gauge.
+P1 uses the keyboard; the first gamepad controls P2 (WASD/left Ctrl also work).
+Scrolling follows the average speed of the active planes. Each plane's throttle
+also changes its vertical position: a faster pilot gains distance over time,
+up to four plane heights (72 logical pixels). The rate of gaining distance is
+proportional to the speed difference; equal speeds preserve the earned lead.
+Shots do not hurt the other pilot, but a plane-to-plane collision kills both.
+A fallen pilot with spare lives returns after the survivor passes the next
+bridge, once a safe spawn position is available. Losing both planes restarts
+the current stage with scores and remaining lives preserved. Each destroyed
+plane costs one life; restarting does not charge another. A pilot with no lives
+stays eliminated; the game ends when neither pilot has lives left.
+Select GAME 3 with F2 and start with Space or Enter.
+
 ## Building and running
 
 Requirements: CMake 3.21+, Ninja, Python 3, and cc65 with the `rp6502` target.
@@ -79,8 +95,8 @@ cmake --build --preset cc65/Release
 The artifact name `riverraid` retains the project's existing target name.
 In VS Code, select the `cc65/Release` preset, the `riverraid` target, and the
 `RP6502-EMU` launch configuration. F5 starts the emulator with debugger support.
-Source symbols are also available in Release. `cc65/Debug` provides unoptimized
-builds; use Release for performance measurements.
+Source symbols are available in both presets. Both use compact optimized C
+code to fit the 64 KiB memory map, including GAME 3 DUO.
 
 The port uses ca65. The llvm-mos presets from the old template are currently
 unsupported by the port's code. The BASIC branch remains a template example.
@@ -93,7 +109,7 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | WASD, left Ctrl | Player 2: movement and firing; also control player 1 in single-player games |
 | Space or Enter | Fire; start a game or restart after game over |
 | F1 | Color / black and white |
-| F2 | SELECT: one-player or two-player variation |
+| F2 | SELECT: GAME 1 solo, GAME 2 alternating, GAME 3 DUO |
 | F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
 | F5 | Player 1: guided or straight missiles |
 | F6 | Player 2: guided or straight missiles |
@@ -106,7 +122,7 @@ four face buttons fire, Start pauses, and Select starts a new game. Flying
 over a fuel tank refuels the plane; shooting the tank awards points.
 A balloon awards 60 points, a tank on the road or bank 250, a bridge 500,
 and a bridge with a tank 750. Scrolling into the next section increases the level.
-In two-player games, players switch after losing a plane.
+In GAME 2, players switch after losing a plane; GAME 3 is simultaneous.
 
 In attract mode, the footer scrolls a light gray caption containing the game
 title, author, copyright dates, Activision logo, and instructions for starting.

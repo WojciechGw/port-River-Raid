@@ -1078,7 +1078,11 @@ def main():
         "dump xram:0x8c00 128","dump xram:0x8c80 128",
         "dump xram:0xbf90 16"])
     for index,image in enumerate(images[:4]):
-        assert image[13*4:14*4]==bytes([0x55 if index&1 else 0x44]*4)
+        stripe=5 if index&1 else 4
+        # Existing artwork has GDDDDDDD in rotor frame 0 and DDDDDDDD in
+        # frame 1. Preserve the green tail pixel as well as the stripe.
+        assert image[13*4:14*4]==bytes(
+            [0x20|stripe if index<2 else stripe*17]+[stripe*17]*3)
         assert not any(image[:8*4]) and not any(image[17*4:])
     assert images[0][8*4:10*4]!=images[2][8*4:10*4], "Rotor frames do not differ"
     assert images[0][11*4:12*4]==images[2][11*4:12*4], "Rotor animation changes the fuselage"
@@ -1337,7 +1341,9 @@ def main():
     a,b,c,descriptors=buffers
     assert a[:36]==b[:36]==c[:36] and a[54:]==b[54:]==c[54:], "Track animation changes the body"
     assert len({a[36:54],b[36:54],c[36:54]})==3, "Track animation frames are identical"
-    assert any(c[42:48]) and not any(a[42:48]+b[42:48]), "Third phase lost its middle-row links"
+    assert (a[42:48],b[42:48],c[42:48])==(
+        bytes([0x10,0,0,0,0x10,0]),bytes([0,0,0,0,0x10,0]),
+        bytes([0x10,0,0,0,0,0])), "Track end pixels differ from the reference art"
     assert all((p>>shift)&15 in (0,1) for p in a+b+c for shift in (0,4)), "Tank has non-black ink"
     for image in (a,b,c):
         lit=[(x,y) for y in range(16) for x in range(12)
@@ -1369,9 +1375,10 @@ def main():
                for slot in (12,16,18)), "Pause did not freeze track animation"
 
     # The missile starts on the middle track row, below the body. At the
-    # outside column only phase 2 has ink in its remaining eight-row path.
+    # outside column follows the end pixels in the current reference art.
     for side in (0,1):
-        for phase,hits in ((0,False),(2,True)):
+        for phase in (0,1,2):
+            hits=phase==0 or phase==(1 if side else 2)
             x=122 if side else 29
             _,states=case(f"tank-track-middle-hit-{side}-{phase}",
                 bank_fixture+bank_at(x=x,y=96,side=side)+[

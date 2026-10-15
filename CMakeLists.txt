@@ -16,6 +16,12 @@ else()
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
+    set(RIVER_MOUNTAINS ${CMAKE_CURRENT_BINARY_DIR}/mountains.h)
+    add_custom_command(OUTPUT ${RIVER_MOUNTAINS}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_mountains.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics.h ${RIVER_MOUNTAINS}
+        DEPENDS src/graphics.h tools/pack_mountains.py
+        VERBATIM)
     set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
     set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
     set(RIVER_COVER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/cover.bin)
@@ -46,7 +52,7 @@ else()
         VERBATIM)
     add_executable(riverraid
         src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm ${RIVER_CORE}
-        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE})
+        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
