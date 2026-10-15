@@ -65,7 +65,10 @@ _Static_assert(XRAM_PCM + 64 + 2048 <= XRAM_GAME_FADE_SOURCE, "Fade overlaps aud
 _Static_assert(XRAM_GAME_FADE_SOURCE + 576 <= XRAM_GAME_FADE_STAGING, "Fade buffers overlap");
 _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow");
 #define XRAM_TERRAIN_CONFIG 0x0200
-#define XRAM_HUD_CONFIG 0x0220
+#define XRAM_SOUND_CONFIG 0x0220
+#define XRAM_SOUND_ICON_CONFIG 0x0230
+#define XRAM_SOUND_ICON 0x02C0
+#define XRAM_SOUND_TEXT 0x02C8
 #define XRAM_SPRITES 0x0300
 #define XRAM_HUD_SPRITES 0x0600
 #define XRAM_LOGO_PALETTE 0x0700
@@ -84,6 +87,9 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define XRAM_IMAGES 0x8000
 #define XRAM_SPRITE_PALETTES 0x0400
 #define XRAM_JET_PALETTE 0x0580
+/* Reserve sprites use only indices 0 and 11. Alias ink 11 to jet ink 1;
+ * index 0 is in the unused palette slot before the jet palette. */
+#define XRAM_GAME2_LIFE_PALETTE 0x056C
 #define XRAM_DUO_PALETTE 0x0584
 #define XRAM_DUO_JETS 0x6300
 #define XRAM_DUO_LIFE_SPRITES 0x6400
@@ -142,8 +148,14 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 _Static_assert(sizeof(bitmap_config_t) == 14, "PIX bitmap layout");
 _Static_assert(sizeof(tile_config_t) == 16, "PIX tile layout");
 _Static_assert(sizeof(character_config_t) == 16, "PIX text layout");
+_Static_assert(XRAM_SOUND_CONFIG + sizeof(character_config_t) <= XRAM_SOUND_ICON_CONFIG, "Sound configs overlap");
+_Static_assert(XRAM_SOUND_ICON_CONFIG + sizeof(bitmap_config_t) <= XRAM_HUD_BITMAP_CONFIG, "Sound icon config overlaps HUD");
+_Static_assert(XRAM_SOUND_ICON + 8 == XRAM_SOUND_TEXT, "Sound icon must precede text");
+_Static_assert(XRAM_SOUND_TEXT + 4 <= XRAM_SPRITES, "Sound text overlaps sprites");
 _Static_assert(sizeof(sprite_t) == 10, "PIX sprite layout");
 _Static_assert(sizeof(oscillator_t) == 8, "PIX PSG layout");
+_Static_assert(XRAM_GAME2_LIFE_PALETTE >= XRAM_SPRITE_PALETTES + 11 * 32, "GAME 2 life palette overlaps objects");
+_Static_assert(XRAM_GAME2_LIFE_PALETTE + 11 * 2 == XRAM_JET_PALETTE + 2, "GAME 2 lives must share jet ink");
 _Static_assert(XRAM_PSG % 256 + 64 <= 256, "PSG page boundary");
 _Static_assert(XRAM_TERRAIN + TERRAIN_COLUMNS * RIVER_RING <= XRAM_TILES, "Terrain overlaps tiles");
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_IMAGES, "Tiles overlap sprites");

@@ -78,7 +78,10 @@ load riverraid.rp6502 /pcm
 
 No parameter selects OPL2. `/auto` selects PCM when supported, otherwise OPL2.
 Explicit `/pcm` reports an error if the firmware lacks PCM.
-Options are case insensitive; if several are supplied, the last one wins.
+Options are case insensitive; if several audio backends are supplied, the last one wins.
+Add `/v` (for example, `load riverraid.rp6502 /opl2 /v`) to show the sound
+icon and PSG/OPL2/PCM label in the top margin. Without `/v`, the margin only
+shows a crossed-out note when F9 has muted sound; it is blank when sound is on.
 `/help` displays usage without opening the cover.
 In the emulator, put the game arguments after `--`:
 
@@ -114,6 +117,8 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |
+| F9 | Sound on / off (all sounds) |
+| F10 | Cycle PSG → OPL2 → PCM → PSG; skip PCM if unsupported |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |

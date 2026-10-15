@@ -1,6 +1,35 @@
 #ifndef RIVER_GRAPHICS_H
 #define RIVER_GRAPHICS_H
 
+/* Sound status, 8x8 pixels: X/x = white, . = transparent/black.
+ * Edit the rows below. Keep #if 0 and the generated include: the build packs
+ * these source pixels into 16 bytes for sound_status.asm. */
+#if 0
+static const char sound_icons[2][8][9] = {
+    { /* Sound on. */
+        "....XX..",
+        "....X.X.",
+        "....X..X",
+        "....X..X",
+        "....X.X.",
+        "..XXX...",
+        ".XXXX...",
+        ".XXX...."
+    },
+    { /* Muted: note with a diagonal strike. */
+        "X...XX..",
+        ".X..X.X.",
+        "..X.X..X",
+        "...XX..X",
+        "....X.X.",
+        "..XXXX..",
+        ".XXXX.X.",
+        ".XXX...X"
+    }
+};
+#endif
+#include "sound_icons.h"
+
 /* Readable demo-footer text and thick 6-column glyphs are in src/demo-footer.json.
  * tools/make_demo_footer.py combines them with this reference logo. */
 

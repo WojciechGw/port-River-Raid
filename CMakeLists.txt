@@ -17,6 +17,12 @@ else()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
     set(RIVER_MOUNTAINS ${CMAKE_CURRENT_BINARY_DIR}/mountains.h)
+    set(RIVER_SOUND_ICONS ${CMAKE_CURRENT_BINARY_DIR}/sound_icons.h)
+    add_custom_command(OUTPUT ${RIVER_SOUND_ICONS}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_sound_icons.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics.h ${RIVER_SOUND_ICONS}
+        DEPENDS src/graphics.h tools/pack_sound_icons.py
+        VERBATIM)
     add_custom_command(OUTPUT ${RIVER_MOUNTAINS}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/pack_mountains.py
             ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics.h ${RIVER_MOUNTAINS}
@@ -60,8 +66,8 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm ${RIVER_CORE}
-        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS})
+        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm ${RIVER_CORE}
+        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)

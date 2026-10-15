@@ -28,6 +28,10 @@ stationary; ships and helicopters begin moving at level two, and planes
 appear from level three. Death restores the saved section; the port adds
 neither invulnerability nor an artificial safe corridor.
 
+In GAME 2, the active player's P1/P2 label, score and reserve planes share
+the aircraft color, including after a turn change or return from F1.
+BRIDGE, its number and the high-score display retain their existing colors.
+
 F3 selects the starting bridge in the cycle 1 → 5 → 20 → 50 → 1 and starts
 a new game. The selection applies to both players and remains active when
 restarting with R. Full initialization applies the selected level, while
@@ -36,6 +40,20 @@ In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
 image remains unchanged. Missile guidance is toggled independently with
 F5 for player 1 and F8 for player 2. F4 toggles color/black and white.
+F9 toggles all sound without pausing the game or changing the audio backend.
+It acts once per press and retains its setting across restart, mode changes
+and the F1 manual. Sound starts enabled when the program is launched.
+F10 cycles PSG → OPL2 → PCM → PSG, skipping PCM when the firmware rejects
+its interface. It stops the previous backend before initializing the next,
+preserves F9 mute and pause, and retains the selection through F1 and restart.
+With `/v`, the top-left margin shows an 8×8 musical note, crossed out when muted,
+followed by one blank character column and the current backend (PSG/OPL2/PCM).
+The icons are defined in `src/graphics.h` and drawn at (0,0) as a 1bpp bitmap;
+the backend starts at (16,0), using the VGA's built-in 8×8 font in
+[character mode](https://picocomputer.github.io/vga.html). Both are white on
+the black margin, update only on F9/F10 or video initialization, and share
+the white splash palette for startup fade. Without `/v`, only the muted icon
+is shown; when sound is enabled, both the icon and backend text are blank.
 F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,

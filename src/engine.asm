@@ -53,6 +53,8 @@ _psg_engine_init:
     sta _engine_rng
     lda #$65
     sta _engine_rng+1
+    lda #0
+    sta running                ; Re-entering PSG must restart Timer 1.
     cli
     rts
 

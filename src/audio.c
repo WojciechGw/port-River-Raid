@@ -20,6 +20,8 @@ static const uint8_t attenuation[16]={15,13,11,9,7,6,5,4,3,3,2,1,1,1,0,0};
 /* YM3812 total level is 0.75 dB per step; match the native linear volume. */
 static const uint8_t opl_level[16]={63,33,25,20,16,13,11,9,8,6,5,4,3,2,1,0};
 uint8_t audio_backend,pcm_enabled,pcm_amplitude[2],pcm_tone[2];
+uint8_t audio_muted;
+uint8_t sound_verbose;
 uint16_t pcm_step[2];
 static uint8_t requested=AUDIO_OPL2,shot_previous,shot_age=18;
 static oscillator_t psg[8];
@@ -54,14 +56,17 @@ void* __fastcall__ __argv_mem(unsigned bytes)
 uint8_t audio_options(int argc,char** argv)
 {
     uint8_t i;
+    const char* option;
     for (i=1;i<argc;++i) {
-        if (!stricmp(argv[i],"/psg")) requested=AUDIO_PSG;
-        else if (!stricmp(argv[i],"/opl2")) requested=AUDIO_OPL2;
-        else if (!stricmp(argv[i],"/pcm")) requested=AUDIO_PCM;
-        else if (!stricmp(argv[i],"/auto")) requested=AUDIO_AUTO;
+        option=argv[i];
+        if (!stricmp(option,"/psg")) requested=AUDIO_PSG;
+        else if (!stricmp(option,"/opl2")) requested=AUDIO_OPL2;
+        else if (!stricmp(option,"/pcm")) requested=AUDIO_PCM;
+        else if (!stricmp(option,"/auto")) requested=AUDIO_AUTO;
+        else if (!stricmp(option,"/v")) sound_verbose=1;
         else {
-            puts("Usage: load riverraid.rp6502 [/auto | /psg | /opl2 | /pcm]");
-            return !stricmp(argv[i],"/help") || !strcmp(argv[i],"/?") ? 1 : 2;
+            puts("Usage: load riverraid.rp6502 [/auto | /psg | /opl2 | /pcm] [/v]");
+            return !stricmp(option,"/help") || !strcmp(option,"/?") ? 1 : 2;
         }
     }
     return 0;
@@ -115,16 +120,21 @@ static void opl_instruments(void)
         opl_write(0xc0+n,connection[n]);
     }
 }
+static uint8_t try_pcm(void)
+{
+    static const uint8_t config[8]={0,2,3,11,0x40,0x1f,0,0};
+    pcm_reset();
+    xram0_set(XRAM_PCM,0,8+2048);
+    xram0_write(XRAM_PCM,config,8);
+    pcm_enabled=xreg(0,1,2,XRAM_PCM)>=0;
+    if (pcm_enabled) audio_backend=AUDIO_PCM;
+    return pcm_enabled;
+}
 uint8_t audio_init(void)
 {
     /* Cover pixels have finished using the shared PCM/OPL XRAM range. */
     if (requested==AUDIO_AUTO || requested==AUDIO_PCM) {
-        static const uint8_t config[8]={0,2,3,11,0x40,0x1f,0,0};
-        pcm_reset();
-        xram0_set(XRAM_PCM,0,8+2048);
-        xram0_write(XRAM_PCM,config,8);
-        pcm_enabled=xreg(0,1,2,XRAM_PCM)>=0;
-        if (pcm_enabled) {audio_backend=AUDIO_PCM; return 1;}
+        if (try_pcm()) return 1;
         if (requested==AUDIO_PCM) {
             puts("PCM requires firmware with XREG(0,1,2).");
             return 0;
@@ -134,6 +144,8 @@ uint8_t audio_init(void)
     /* A supported PCM stream must not remain mixed with an explicit PSG/OPL. */
     if (requested==AUDIO_OPL2 || requested==AUDIO_PSG) xreg(0,1,2,0xffff);
     if (audio_backend==AUDIO_OPL2) {
+        /* PCM shares this range; never enable OPL with stale sample bytes. */
+        xram0_set(XRAM_OPL,0,256);
         if (xreg(0,1,1,XRAM_OPL)<0) return 0;
         opl_write(1,32); /* waveform selection */
         opl_instruments();
@@ -142,6 +154,7 @@ uint8_t audio_init(void)
     {
         uint8_t n;
         uint16_t clock=(uint16_t)ria_attr_get(RIA_ATTR_PHI2_KHZ)>>5;
+        memset(psg,0,sizeof(psg));
         /* Q8 periods avoid linking a 32-bit divider for startup alone. */
         for (n=0;n<16;++n) engine_period[n]=((clock*engine_divider[n])>>3)-2;
         /* Opposite stationary waves act as signed level outputs. A timer
@@ -252,7 +265,7 @@ static void opl_update(uint8_t flight,uint8_t native_engine)
 void audio_update(uint8_t paused,uint8_t demo)
 {
     uint8_t n,ctrl,divider,volume,shot,engine,muted,flight;
-    muted=paused || demo;
+    muted=paused || demo || audio_muted;
     shot=G(0xfb);
     if (muted || G(0xc6) || (audio_backend==AUDIO_PCM && G(0xf8)==1)) shot_age=18;
     else if (shot>shot_previous) shot_age=0;
@@ -287,5 +300,15 @@ void audio_stop(void)
     if (audio_backend==AUDIO_PCM) xreg(0,1,2,0xffff);
     else if (audio_backend==AUDIO_OPL2) xreg(0,1,1,0xffff);
     else {psg_engine_stop(); xram0_set(XRAM_PSG,0,64); xreg(0,1,0,0xffff);}
+    pcm_enabled=0;
+}
+uint8_t audio_next(void)
+{
+    audio_stop();
+    requested=audio_backend==AUDIO_PSG ? AUDIO_OPL2 : AUDIO_PSG;
+    if (audio_backend==AUDIO_OPL2 && try_pcm()) {
+        requested=AUDIO_PCM; return 1;
+    }
+    return audio_init();
 }
 #pragma optimize (pop)

@@ -42,6 +42,11 @@ zawijanie bufora oraz publikowanie tylko kompletnych stron.
 6502: wolny/szybki silnik, wybuch i pocisk. To surowe PCM 8 kHz, bez
 interpolacji miksera i toru audio fizycznego komputera.
 Opcja `--audio-only` uruchamia wyłącznie scenariusze dźwięku.
+Testy `f10-*` obejmują cykl PSG/OPL2/PCM, przytrzymanie klawisza,
+pauzę, F9, powrót z F1 oraz przełączanie podczas lotu solo i DUO.
+Ponieważ emulator obsługuje PCM, brak tego interfejsu jest sprawdzany przez
+symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
+Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.
 Pełny zestaw wymaga PCM, natomiast scenariusze `audio-psg-*` i `audio-opl2-*`
 wybierają backend przez rzeczywiste argumenty programu. Sprawdzają wzrost
 względnej szerokości pasma silnika przy przyspieszaniu, niezależność efektów,
@@ -92,6 +97,18 @@ przez F5 (P1) i F8 (P2), brak powtarzania przy przytrzymaniu oraz brak funkcji F
 F5/F8 i instrukcję pod F1. Testy powrotu porównują stan gry, teren, HUD,
 samoloty i palety przed i po instrukcji we wszystkich trzech trybach.
 Obejmują przytrzymane F1, ponowne otwarcie, zachowanie pauzy oraz backendy audio.
+Testy `f9-mute-*` sprawdzają wyciszenie i przywrócenie dźwięku we wszystkich
+trybach gry i backendach, przytrzymanie klawisza oraz zachowanie ustawienia
+po F1, restarcie i zmianie trybu.
+Testy `sound-status-*` sprawdzają położenie (0,0), czcionkę 8×8, białą paletę,
+ikony nutki i przekreślonej nutki, odstęp jednej kolumny tekstowej,
+wszystkie generatory i powrót z F1 w każdym trybie gry.
+Obejmują pełny pasek z `/v` (także `/V`) oraz domyślny widok, w którym
+pojawia się wyłącznie przekreślona nutka po wyciszeniu dźwięku.
+Zapisują także obrazy `sound-status-on-game*.png` i `sound-status-off-game*.png`.
+Test `game2-player-hud-colors` sprawdza kolor etykiety, punktów i zapasowych
+samolotów po rzeczywistym przekazaniu tury P1 do P2, po F4 i powrocie z F1.
+Sprawdza też zachowanie koloru mostu i przezroczystość tła ikon żyć.
 Scenariusze `bridge-difficulty-*` sprawdzają cykl F3: 1 → 5 → 20 → 50 → 1,
 brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD, restart z pauzy,
 zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 50.

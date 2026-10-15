@@ -56,6 +56,9 @@ void rr_tank_bonus(void);
 void rr_tank_crash(void);
 void demo_tick(void);
 void present_frame(void);
+int sound_status_init(void);
+void sound_status_update(void);
+void refresh_jet_palette(void);
 void show_cover(void);
 void show_outro(void);
 void show_manual(void);
@@ -153,7 +156,8 @@ uint8_t road_gunner=255;
 static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
-static uint8_t state_bytes[32], old_score[12], old_fuel, palette_player;
+static uint8_t state_bytes[32], old_score[12], old_fuel;
+uint8_t palette_player;
 static uint16_t ticks, skipped_frames, jet_cache=0xffff;
 /* 1: startup fade, 2: scrolling attract demo, 0: user game. */
 uint8_t ready=1;
@@ -463,44 +467,41 @@ static void refresh_duo_hud_palettes(void)
     xram0_poke16(XRAM_DUO_HUD_P2_PALETTE,0);
     xram0_poke16(XRAM_DUO_HUD_P2_PALETTE+22,colors[6]);
 }
-static void refresh_jet_palette(void)
-{
-    static uint16_t colors[2];
-    colors[0]=0; colors[1]=PLAYER && VAR!=2 ? RGB(0,31,31) : tia_color(rr_ColorTab[1]);
-    upload(XRAM_JET_PALETTE,colors,4); palette_player=PLAYER;
-    colors[1]=tia_color(0xac); upload(XRAM_DUO_PALETTE,colors,4);
-}
+/* Linker-managed zero page keeps the palette scratch outside full main RAM. */
+#pragma bss-name(push, "ZEROPAGE")
+static uint16_t palette_colors[16];
+#pragma bss-name(pop)
+#pragma zpsym("palette_colors")
 static void refresh_palettes(void)
 {
     /* Like the terrain scratch space, this buffer has a single main-loop
      * owner. Avoid indirect stack indexing during a restart plus B&W change. */
-    static uint16_t colors[16];
     static uint8_t id,i,count;
-    colors[0]=0; colors[1]=tia_color(rr_ColorTab[4]);
-    colors[2]=tia_color(0xd2); colors[3]=tia_color(0xd6);
-    colors[4]=tia_color(4); colors[5]=tia_color(8); colors[6]=tia_color(rr_ColorTab[1]);
-    colors[7]=RGB(0,0,0); colors[8]=tia_color(rr_ColorTab[1]); colors[9]=tia_color(0x06);
-    colors[10]=tia_color(rr_ColorTab[2]); colors[11]=tia_color(rr_ColorTab[3]);
-    colors[12]=tia_color(0x20); /* Brown bank rim and mountain faces. */
-    colors[13]=tia_color(0x32); colors[14]=tia_color(0x2a); colors[15]=tia_color(0xa8);
-    upload(XRAM_PALETTE,colors,32);
-    colors[11]=colors[7]; upload(XRAM_HUD_BLACK_PALETTE,colors,32);
+    palette_colors[0]=0; palette_colors[1]=tia_color(rr_ColorTab[4]);
+    palette_colors[2]=tia_color(0xd2); palette_colors[3]=tia_color(0xd6);
+    palette_colors[4]=tia_color(4); palette_colors[5]=tia_color(8); palette_colors[6]=tia_color(rr_ColorTab[1]);
+    palette_colors[7]=RGB(0,0,0); palette_colors[8]=tia_color(rr_ColorTab[1]); palette_colors[9]=tia_color(0x06);
+    palette_colors[10]=tia_color(rr_ColorTab[2]); palette_colors[11]=tia_color(rr_ColorTab[3]);
+    palette_colors[12]=tia_color(0x20); /* Brown bank rim and mountain faces. */
+    palette_colors[13]=tia_color(0x32); palette_colors[14]=tia_color(0x2a); palette_colors[15]=tia_color(0xa8);
+    upload(XRAM_PALETTE,palette_colors,32);
+    palette_colors[11]=palette_colors[7]; upload(XRAM_HUD_BLACK_PALETTE,palette_colors,32);
     if (VAR==2) refresh_duo_hud_palettes();
     for (id=0;id<OBJECT_IMAGE_COUNT;++id) {
-        colors[0]=0;
+        palette_colors[0]=0;
         count=id==BALLOON_ID ? sizeof(balloon_colors) : id==TANK_ID ? sizeof(tank_colors) : 16;
-        for (i=1;i<count;++i) colors[i]=tia_color(sprite_colors[id][i]);
-        upload(palette_address(id),colors,32);
+        for (i=1;i<count;++i) palette_colors[i]=tia_color(sprite_colors[id][i]);
+        upload(palette_address(id),palette_colors,32);
     }
-    refresh_jet_palette(); colors[0]=0;
+    refresh_jet_palette(); palette_colors[0]=0;
     for (i=0;i<6;++i) {
-        colors[i+1]=(G(0x86)==255 && !G(0x85)) ?
+        palette_colors[i+1]=(G(0x86)==255 && !G(0x85)) ?
             RGB(activision_colors[i][0],activision_colors[i][1],activision_colors[i][2]) :
             tia_color(activision_color_roles[i]);
     }
-    upload(XRAM_LOGO_PALETTE,colors,14);
+    upload(XRAM_LOGO_PALETTE,palette_colors,14);
     /* The demo caption stays light gray when the screensaver changes hues. */
-    colors[2]=RGB(23,23,23); upload(XRAM_DEMO_FOOTER_PALETTE,colors,14);
+    palette_colors[2]=RGB(23,23,23); upload(XRAM_DEMO_FOOTER_PALETTE,palette_colors,14);
     palette_mask=G(0x86); palette_xor=G(0x85);
 }
 #pragma optimize(pop)
@@ -720,13 +721,11 @@ static uint8_t opaque(uint8_t id,uint8_t x,uint8_t y,uint8_t flip,uint8_t block)
 }
 void sync_tanks(void);
 void move_tanks(void);
-#pragma code-name(push, "CODE")
 static uint8_t tank_on_bridge(uint8_t n)
 {
     int16_t center=tanks[n].x+4,bridge=object_x(n);
     return ID(n)==8 && tanks[n].status==1 && center>=bridge && center<bridge+widths[8];
 }
-#pragma code-name(pop)
 static void destroy_tank(uint8_t n)
 {
     tanks[n].status=2; tanks[n].explosion=12; tank_bonus=1;
@@ -1246,7 +1245,7 @@ static void hud_details(void)
     }
     if (dirty) upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites));
     if (shown_player!=PLAYER) {
-        hud_label(HUD_PLAYER_X,6,PLAYER ? "P2" : "P1",0xbb); shown_player=PLAYER;
+        hud_label(HUD_PLAYER_X,6,PLAYER ? "P2" : "P1",VAR==1 ? 0x88 : 0xbb); shown_player=PLAYER;
     }
 }
 static void update_high_score(void)
@@ -1373,7 +1372,7 @@ static void render(void)
     /* World position and sprites stay in RAM until the next VSYNC. Publish
      * them together before doing any input, collision or terrain work. */
     if (palette_mask!=G(0x86) || palette_xor!=G(0x85)) refresh_palettes();
-    /* The player switch changes only the jet, not every world palette. */
+    /* Refresh the jet and GAME 2 player HUD together on a turn change. */
     else if (palette_player!=PLAYER) refresh_jet_palette();
     if (G(0x8d)) {
         c=tia_color((G(0x8d)&1) ? 0x42 : rr_ColorTab[4]);
@@ -1460,7 +1459,8 @@ static void hud_layout(void)
     }
     if (hud_pending<2) {
     for (i=0;i<HUD_SPRITE_COUNT;++i) {
-        hud_sprites[i].y=-256; hud_sprites[i].palette=XRAM_PALETTE;
+        hud_sprites[i].y=-256;
+        hud_sprites[i].palette=VAR==1 && i>=9 ? XRAM_GAME2_LIFE_PALETTE : XRAM_PALETTE;
         hud_sprites[i].size=0x11; hud_sprites[i].options=0x42;
         if (i>=3 && i<9) {
             hud_sprites[i].x=(HUD_RECORD_X+(i-3)*8)*2; hud_sprites[i].y=HUD_TOP+HUD_SCORE_Y;
@@ -1650,7 +1650,8 @@ static uint8_t configure_video(uint8_t restoring)
         game_fade_prepare();
     }
     if (restoring && !audio_init()) return 0;
-    if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+    if (sound_status_init()<0 ||
+        xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),PLAYER_SPRITE-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_SPRITES+PLAYER_SPRITE*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
@@ -1665,7 +1666,7 @@ static uint8_t configure_video(uint8_t restoring)
 /* Keep startup and the frame loop compact in the fixed Debug RAM map. */
 int main(int argc,char** argv)
 {
-    uint8_t last_vsync,now,delta,input,controls,old_offset,old_intro,old_variant,scroll,y;
+    uint8_t last_vsync,now,delta,input,controls,changes,old_offset,old_intro,old_variant,scroll,y;
     input=audio_options(argc,argv);
     if (input) return input==1 ? 0 : 2;
     RIA.step0=1; RIA.step1=1;
@@ -1704,18 +1705,20 @@ int main(int argc,char** argv)
             last_vsync=RIA.vsync;
             continue;
         }
-        controls=(pressed(0x3d) ? 1 : 0)|(pressed(0x3b) ? 2 : 0)|
-                 (pressed(0x3c) ? 4 : 0)|(pressed(0x3e) ? 8 : 0)|
-                 (pressed(0x41) ? 16 : 0);
-        if ((controls&1) && !(previous_keys&1)) switches^=8;
-        if ((controls&4) && !(previous_keys&4)) {
+        /* Gather F2..F5 from HID byte 7 and F8..F10 from byte 8. */
+        controls=((keys[7]>>5)&1)|((keys[7]>>2)&6)|
+                 ((keys[7]>>3)&8)|((keys[8]<<3)&112);
+        changes=controls&~previous_keys;
+        switches^=(changes&25)<<3; /* F4 palette, F5/F8 missile guidance. */
+        if (changes&4) {
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
         }
-        if ((controls&8) && !(previous_keys&8)) switches^=64;
-        if ((controls&16) && !(previous_keys&16)) switches^=128;
+        if (changes&32) audio_muted^=1;
+        if ((changes&64) && !audio_next()) return 1;
+        if (changes&96) sound_status_update();
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
-        if (((controls&4) && !(previous_keys&4)) ||
+        if ((changes&4) ||
             ((input&START) && !(previous_input&START)) ||
             ((ready || MODE==255) && (input&FIRE) && !(previous_input&FIRE))) {
             G(0x282)&=~1; ready=0; paused=0;
@@ -1742,7 +1745,7 @@ int main(int argc,char** argv)
                 duo_started=duo_restart=0; memset(duo_players,0,sizeof(duo_players));
             }
             if (duo_restart) duo_restart_stage();
-            if (old_variant!=VAR && (old_variant==2 || VAR==2)) {
+            if (old_variant!=VAR) {
                 hud_clear(); hud_pending=1;
                 xram0_poke16(XRAM_HUD_BITMAP_CONFIG+12,VAR==2 ? XRAM_DUO_HUD_P1_PALETTE : XRAM_PALETTE);
             }

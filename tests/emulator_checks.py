@@ -233,6 +233,8 @@ def check_bank_detail(config, terrain, tiles, river1, river2):
 
 
 def run_audio_checks(case,sym,fixture,resume,start,output):
+    from audio_switch_checks import run_audio_switch_checks
+    run_audio_switch_checks(case,sym,fixture,resume,start)
     # PCM must be explicitly supported, and PSG must stay silent alongside it.
     _, samples=case("audio-pcm-init-and-pause",fixture+[
         f'peek 0x{sym["pcm_enabled"]:04x} 1',"dump xram:0xc000 8",
@@ -481,6 +483,7 @@ def main():
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
+    parser.add_argument("--audio-switch-only",action="store_true")
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
     parser.add_argument("--controls-only",action="store_true")
@@ -549,6 +552,12 @@ def main():
     if args.audio_only:
         run_audio_checks(case,sym,fixture,resume,start,output)
         print(f"All {count} audio checks passed.",flush=True)
+        return
+
+    if args.audio_switch_only:
+        from audio_switch_checks import run_audio_switch_checks
+        run_audio_switch_checks(case,sym,fixture,resume,start)
+        print(f"All {count} audio switching checks passed.",flush=True)
         return
 
     if args.duo_only:

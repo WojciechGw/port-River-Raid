@@ -1,14 +1,76 @@
 """Function keys and resuming a frozen game after the F1 manual."""
 import struct
+import re
+from pathlib import Path
 
 
 def run_help_checks(case, sym, boot, output):
+    # Use the editable artwork as the reference, so drawing a new note does
+    # not require duplicating its pixels in this renderer integration check.
+    graphics=(Path(__file__).resolve().parents[1] / 'src/graphics.h').read_text(encoding='utf-8')
+    icon_source=graphics.split('static const char sound_icons',1)[1].split('};',1)[0]
+    icon_rows=re.findall(r'"([.Xx]{8})"',icon_source)
+    assert len(icon_rows)==16
+    icons=bytes(sum((pixel in 'Xx') << (7-x) for x,pixel in enumerate(row)) for row in icon_rows)
+    note,muted=icons[:8],icons[8:]
     opening = ["press f1", "wait xram:0x0080 0 10",
                "wait xram:0x00b0 2 120", "run 90", "peek xram:0x00b0 2",
                "release f1", "wait xram:0x02a4 222 5"]
     closing = ["press space", "run 3", "release space",
                "wait xram:0x0080 82 240", "run 3"]
     pause = ["press p", "run 3", "release p", "run 3"]
+    # Follow real turn changes, rather than forcing PLAYER in a paused game.
+    hud_dump=['dump xram:0x0100 32','dump xram:0x056c 24',
+              'dump xram:0x0600 190','dump xram:0xa000 1920','dump 0xf4 1']
+    game2=boot+['press f2','run 3','release f2','run 8',
+                'press space','run 140','release space','run 4']+pause
+    _,hud=case('game2-player-hud-colors',game2+hud_dump+[
+        f'shot "{(output / "game2-hud-p1.png").as_posix()}"',
+        'poke 0xb3 4']+pause+['wait 0xf4 1 240','wait 0xc6 48 300','run 3']+
+        pause+hud_dump+[
+        f'shot "{(output / "game2-hud-p2.png").as_posix()}"',
+        'press f4','run 3','release f4','run 3']+hud_dump+
+        ['mark']+opening+closing+['expect-same']+hud_dump)
+    for turn,player in enumerate((0,1,1,1)):
+        palette,life_palette,sprites,bitmap,active=hud[turn*5:turn*5+5]
+        assert active==bytes((player,))
+        assert palette[16:18]==life_palette[22:24], 'Score differs from jet color'
+        assert life_palette[:2]==b'\0\0', 'Life icon background must stay transparent'
+        for slot in range(9,18):
+            assert struct.unpack_from('<H',sprites,slot*10+6)[0]==0x056c
+        label=[b for y in range(6,12) for b in bitmap[y*160+12:y*160+20]]
+        assert 0x88 in label and all((b>>4) in (8,10) and (b&15) in (8,10) for b in label)
+        assert 0x88 in bitmap[5*160+26:11*160], 'Score ink missing'
+    assert hud[1][22:24]!=hud[6][22:24], 'P1 and P2 should have different colors'
+    assert hud[5][22:24]==hud[0][22:24], 'Turn change altered BRIDGE color'
+    for variant,verbose in ((v,verbose) for v in range(3) for verbose in (False,True)):
+        suffix='' if verbose else '-quiet'
+        options=(('/opl2','/V') if variant==1 else ('/v','/opl2')) if verbose else ()
+        select=boot+[cmd for _ in range(variant) for cmd in
+                     ('press f2','run 3','release f2','run 8')]
+        start=select+['press space','run 140','release space','run 4']+pause
+        text_dump=['dump xram:0x02c0 12']
+        toggle=['press f9','run 3','release f9','run 3']
+        cycle=['press f10','run 3','release f10','run 3']
+        _,data=case(f'sound-status-game{variant+1}{suffix}',start+[
+            'dump xram:0x0220 30','dump xram:0xbf80 4']+text_dump+[
+            f'shot "{(output / f"sound-status-on-game{variant+1}{suffix}.png").as_posix()}"']+
+            toggle+text_dump+[
+            f'shot "{(output / f"sound-status-off-game{variant+1}{suffix}.png").as_posix()}"',
+            'mark']+opening+closing+['expect-same']+
+            cycle+text_dump+cycle+text_dump+cycle+toggle+text_dump+['mark']+
+            opening+closing+['expect-same']+text_dump+[
+            'press f4','run 3','release f4','run 3','dump xram:0xbf80 4']+text_dump,
+            rom_args=options)
+        assert struct.unpack('<BBhhhhHHH',data[0][:16])==(0,0,16,0,4,1,0x02c8,0xbf80,0xffff)
+        assert struct.unpack('<BBhhhhHH',data[0][16:])==(0,0,0,0,8,8,0x02c0,0xbf80)
+        assert data[1]==data[8]==bytes((0,0,255,255)), 'Status is not white on black'
+        on=note+b'OPL2' if verbose else bytes(8)+b'    '
+        off=muted+(b'OPL2' if verbose else b'    ')
+        assert data[2:8]==[on,off,
+            muted+(b'PCM ' if verbose else b'    '),
+            muted+(b'PSG ' if verbose else b'    '),on,on]
+        assert data[9]==on
     snapshot = ["dump 0x80 128", "dump xram:0x0200 16",
                 "dump xram:0x0800 7680", "dump xram:0xa000 5920",
                 "dump xram:0x0300 250", "dump xram:0x0400 512",
@@ -62,3 +124,37 @@ def run_help_checks(case, sym, boot, output):
         "release f8", "run 3", "press f6", "run 3", "release f6", "run 3",
         "dump 0x0282 1"])
     assert [v[0] for v in values]==[0x0b,0x03,0x03,0x43,0xc3,0xc3,0xc3]
+
+    for variant in range(3):
+        select=boot+[cmd for _ in range(variant) for cmd in
+                     ('press f2','run 3','release f2','run 8')]
+        start=select+['press space','run 140','release space','run 4']
+        for backend in ('psg','opl2','pcm'):
+            sound_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
+                        'dump xram:0x0180 64' if backend=='psg' else
+                        'dump xram:0xc000 256' if backend=='opl2' else
+                        'dump xram:0xc000 8']
+            flag=f'peek 0x{sym["audio_muted"]:04x}'
+            # Check the frame budget through F9/F1. A full terrain rebuild
+            # on R can take an extra frame independently of the mute toggle.
+            _,buffers=case(f'f9-mute-game{variant+1}-{backend}',start+[flag+' 0']+
+                sound_dump+['press f9','run 3',flag+' 1','peek xram:0x008b 0']+
+                sound_dump+['press space','run 20',flag+' 1']+sound_dump+[
+                    'release space','release f9','run 3']+pause+opening+closing+[
+                    flag+' 1','peek xram:0x008b 1']+sound_dump+pause+[
+                    'press f9','run 3','release f9','run 3',flag+' 0']+sound_dump+[
+                    'press f9','run 3','release f9','run 3',flag+' 1',
+                    'peek xram:0x009e 0 0',
+                    'press r','run 4','release r','run 4',flag+' 1',
+                    'press f2','run 3','release f2','run 8',flag+' 1'],
+                gameplay=False,rom_args=('/'+backend,))
+            amplitudes=buffers[::2]
+            assert any(amplitudes[0]) and any(amplitudes[4]), 'F9 did not restore sound'
+            assert all(not any(a) for a in amplitudes[1:4]), 'Muted effects remain audible'
+            registers=buffers[1::2]
+            if backend=='psg':
+                assert all(not (s[n*8+6]&1) for s in registers[1:4] for n in range(8))
+                assert any(registers[4][n*8+6]&1 for n in range(8))
+            elif backend=='opl2':
+                assert all(not (s[0xb0+n]&32) for s in registers[1:4] for n in range(9))
+                assert any(registers[4][0xb0+n]&32 for n in range(9))

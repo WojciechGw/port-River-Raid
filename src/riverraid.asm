@@ -17,6 +17,8 @@
 .export _mask_player_land
 .import _collision_mask, _collision_scale
 .export _tia_color
+.export _refresh_jet_palette
+.import _palette_player, _rr_ColorTab
 .import _tia_palette
 .export _demo_tick
 .import _ready
@@ -277,6 +279,58 @@ _tia_color:
     tay
     lda _tia_palette,y
     ldx _tia_palette+1,y
+    rts
+
+; Jet ink also drives GAME 2 score/label ink (palette index 8).
+; Reserve sprite palette $056C aliases index 11 to jet ink at $0582.
+; Direct port writes keep this turn/palette update within the CPU RAM budget.
+_refresh_jet_palette:
+    lda #1
+    sta RIA_STEP0
+    lda #$05
+    sta RIA_ADDR0+1
+    lda #$6c
+    sta RIA_ADDR0
+    stz RIA_RW0
+    stz RIA_RW0
+    lda #$84
+    sta RIA_ADDR0
+    stz RIA_RW0
+    stz RIA_RW0
+    lda #$ac
+    jsr _tia_color
+    sta RIA_RW0
+    stx RIA_RW0
+    lda #$80
+    sta RIA_ADDR0
+    stz RIA_RW0
+    stz RIA_RW0
+    lda $f4
+    sta _palette_player
+    beq @native
+    lda $80
+    cmp #2
+    beq @native
+    lda #$e0                 ; RGB(0,31,31), same cyan as the classic P2 jet.
+    ldx #$ff
+    bra @jet
+@native:
+    lda _rr_ColorTab+1
+    jsr _tia_color
+@jet:
+    sta RIA_RW0
+    stx RIA_RW0
+    tay
+    lda $80
+    cmp #2
+    beq @done
+    lda #$01
+    sta RIA_ADDR0+1
+    lda #$10
+    sta RIA_ADDR0
+    sty RIA_RW0
+    stx RIA_RW0
+@done:
     rts
 
 ; AX = native jet bitmap pointer. Expand two bits to each 4bpp output byte.
