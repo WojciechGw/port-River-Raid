@@ -108,7 +108,6 @@ static const uint8_t tank_colors[3]={0,0x00,0x08};
 /* Native ship, top to bottom at block rows 16..23. X = opaque,
  * . = transparent. Each column is doubled horizontally by the renderer.
  * Preserve the native palette slots used by the two-row color bands. */
-#pragma rodata-name(push, "SPLASH")
 static const char ship_pixels[8][9]={
     "...X....",
     "...X....",
@@ -123,7 +122,6 @@ static const uint8_t ship_colors[16]={
     0,0x2a,0xac,0x9c,0x8c,0xba,0x32,0x00,
     0x00,0x20,0x14,0x12,0x14,0x12,0x00,0x00
 };
-#pragma rodata-name(pop)
 /* Tank rounds fly horizontally; white impact circles damage the jet.
  * W = white shell (impact palette), E = pale yellow destruction flash. */
 #pragma rodata-name(push, "SPLASH")

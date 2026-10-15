@@ -3,6 +3,7 @@
 #include "xram.h"
 #include "graphics.h"
 #include "audio.h"
+#include "duo.h"
 #include "demo_footer.h"
 
 _Static_assert(XRAM_DEMO_FOOTER_IMAGE + DEMO_FOOTER_BYTES <= XRAM_MEDIUM_MOUNTAIN, "Demo footer overlaps mountain");
@@ -147,7 +148,7 @@ static uint8_t state_bytes[32], old_score[12], old_fuel, palette_player;
 static uint16_t ticks, skipped_frames, jet_cache=0xffff;
 /* 1: startup fade, 2: scrolling attract demo, 0: user game. */
 uint8_t ready=1;
-static uint8_t hud_dirty=1, reflected;
+static uint8_t hud_dirty=1, reflected, hud_pending;
 static uint8_t fuel_rows[16][HUD_FUEL_WIDTH];
 static uint8_t score_rows[12][6];
 uint16_t tia_palette[128];
@@ -444,8 +445,9 @@ static void rebuild_terrain(void)
 static void refresh_jet_palette(void)
 {
     static uint16_t colors[2];
-    colors[0]=0; colors[1]=PLAYER ? RGB(0,31,31) : tia_color(rr_ColorTab[1]);
+    colors[0]=0; colors[1]=PLAYER && VAR!=2 ? RGB(0,31,31) : tia_color(rr_ColorTab[1]);
     upload(XRAM_JET_PALETTE,colors,4); palette_player=PLAYER;
+    colors[1]=tia_color(0xac); upload(XRAM_DUO_PALETTE,colors,4);
 }
 static void refresh_palettes(void)
 {
@@ -1104,6 +1106,7 @@ jet_checked:
         if (sy>=0 && sy<160 && land_at(MX,sy)) {G(0xe6)=0; break;}
     }
 }
+#include "duo.inc"
 /* Keep bounded input decoding compact in the fixed Debug memory map. */
 #pragma optimize(push, on)
 static uint8_t pressed(uint8_t code)
@@ -1127,10 +1130,11 @@ static uint8_t read_input(void)
     for (n=0;n<2;++n) {
         pad=pads+n*10;
         if (pad[0]&0x80) {
-            inputs[n]|=(pad[0]|pad[1])&15;
-            if (pad[2]&0x1b) inputs[n]|=FIRE;
-            if (pad[3]&8) inputs[n]|=PAUSE;
-            if (pad[3]&4) inputs[n]|=START;
+            v=VAR==2 ? 1 : n;
+            inputs[v]|=(pad[0]|pad[1])&15;
+            if (pad[2]&0x1b) inputs[v]|=FIRE;
+            if (pad[3]&8) inputs[v]|=PAUSE;
+            if (pad[3]&4) inputs[v]|=START;
         }
     }
     if (!VAR) inputs[0]|=inputs[1];
@@ -1309,6 +1313,10 @@ static void render(void)
     }
     bank_tanks_render();
     helicopter_shots_render();
+    /* Keep the legacy descriptor at zero for diagnostics. PIX has one
+     * sprite list per plane: both front-plane jets must be contiguous. */
+    sprites[22]=sprites[0];
+    if (VAR==2) duo_render();
     terrain.y_pos_px=RIVER_TOP-ring_top;
     /* World position and sprites stay in RAM until the next VSYNC. Publish
      * them together before doing any input, collision or terrain work. */
@@ -1335,10 +1343,128 @@ static void render(void)
     state_bytes[28]=VAR; state_bytes[29]=PLAYER;
     state_bytes[30]=skipped_frames; state_bytes[31]=skipped_frames>>8;
     upload(XRAM_STATE,state_bytes,32);
+    if (hud_pending) return;
+    if (VAR==2) {
+        upload(XRAM_DUO_STATE,duo_players,sizeof(duo_players));
+        duo_hud(); return;
+    }
     if (memcmp(old_score,(void*)0xcd,12)) {hud_dirty|=1; update_high_score();}
     if (old_fuel!=(G(0xb7)>>3)) hud_dirty|=2;
     if (hud_dirty) draw_hud();
     hud_details();
+}
+#pragma code-name(push, "SPLASH")
+static void hud_layout(void)
+{
+    static uint8_t i,y;
+    if (hud_pending==3) {hud_pending=0; return;}
+    shown_level=shown_variant=shown_player=shown_reserves=shown_demo=255;
+    palette_player=255; high_dirty=1;
+    if (VAR==2) {
+        if (hud_pending<2) {
+        hud_dirty=7;
+        for (i=0;i<HUD_SPRITE_COUNT;++i) {
+            hud_sprites[i].y=-256; hud_sprites[i].size=0x11;
+            hud_sprites[i].palette=XRAM_HUD_BLACK_PALETTE;
+        }
+        hud_label(4,3,"P1",0x77); hud_label(84,3,"P2",0x77);
+        for (i=0;i<12;++i) {
+            hud_sprites[i].x=(20+(i/6)*80+(i%6)*8)*2;
+            hud_sprites[i].y=HUD_TOP+2;
+        }
+        for (i=0;i<2;++i) {
+            hud_sprites[12+i].x=(64+i*80)*2; hud_sprites[12+i].y=HUD_TOP+12;
+            hud_sprites[17+i].x=(52+i*80)*2;
+            hud_sprites[17+i].image=XRAM_RESERVE_IMAGE;
+        }
+        hud_sprites[14].x=52*2; hud_sprites[14].y=HUD_TOP+27;
+        hud_sprites[14].image=XRAM_SCORE_DIGITS+3*32;
+        hud_sprites[15].x=132*2; hud_sprites[16].x=140*2;
+        hud_sprites[16].y=HUD_TOP+27;
+        if (hud_pending) {hud_pending=2; return;}
+        }
+        hud_column=12; hud_length=32; hud_ink=0x77;
+        for (y=0;y<6;++y) {
+            memset(row+12,0xaa,32);
+            for (i=0;i<4;++i) draw_glyph(12+i*8,bitmap_row(game_label[i][y]));
+            write_hud_span(XRAM_HUD+(uint16_t)(27+y)*RIVER_WIDTH+12);
+        }
+        hud_column=88;
+        for (y=0;y<6;++y) {
+            memset(row+88,0xaa,32);
+            for (i=0;i<4;++i) draw_glyph(88+i*8,bitmap_row(bridge_label[y]+i*8));
+            write_hud_span(XRAM_HUD+(uint16_t)(27+y)*RIVER_WIDTH+88);
+        }
+        xram0_poke16(XRAM_DEMO_FOOTER_CONFIG+4,-256); footer_offset=0;
+        if (hud_pending) hud_pending=3;
+        return;
+    }
+    if (hud_pending<2) {
+    for (i=0;i<HUD_SPRITE_COUNT;++i) {
+        hud_sprites[i].y=-256; hud_sprites[i].palette=XRAM_PALETTE;
+        hud_sprites[i].size=0x11; hud_sprites[i].options=0x42;
+        if (i>=3 && i<9) {
+            hud_sprites[i].x=(HUD_RECORD_X+(i-3)*8)*2; hud_sprites[i].y=HUD_TOP+HUD_SCORE_Y;
+            hud_sprites[i].palette=XRAM_HUD_BLACK_PALETTE;
+        } else if (i>=9 && i<18) {
+            hud_sprites[i].x=(88+(i-9)*8)*2; hud_sprites[i].image=XRAM_RESERVE_IMAGE;
+        }
+    }
+    hud_sprites[0].x=HUD_GAME_NUMBER_X*2; hud_sprites[0].y=HUD_TOP+HUD_GAME_NUMBER_Y;
+    hud_sprites[0].palette=XRAM_HUD_BLACK_PALETTE;
+    hud_sprites[1].x=(HUD_BRIDGE_NUMBER_X-8)*2;
+    hud_sprites[2].x=HUD_BRIDGE_NUMBER_X*2; hud_sprites[2].y=HUD_TOP+HUD_GAME_Y;
+    /* Preserve the logo bitmap while positioning it in the reference layout. */
+    hud_sprites[18].x=48; hud_sprites[18].y=HUD_FOOTER_Y;
+    hud_sprites[18].image=XRAM_LOGO_IMAGE; hud_sprites[18].palette=XRAM_LOGO_PALETTE;
+    hud_sprites[18].size=0x1e;
+    hud_dirty=7;
+    if (hud_pending) {hud_pending=2; return;}
+    }
+    hud_label(HUD_HI_X,6,"HI",0x77);
+    hud_column=HUD_HI_X; hud_length=28; hud_ink=0xbb;
+    for (y=0;y<6;++y) {
+        memset(row+HUD_HI_X,0xaa,28);
+        for (i=0;i<4;++i) draw_glyph(HUD_HI_X+i*8,bitmap_row(bridge_label[y]+i*8));
+        write_hud_span(XRAM_HUD+(uint16_t)(HUD_GAME_Y+y)*RIVER_WIDTH+HUD_HI_X);
+    }
+    hud_column=HUD_GAME_X; hud_length=4*HUD_GAME_PITCH; hud_ink=0x77;
+    for (y=0;y<6;++y) {
+        memset(row+HUD_GAME_X,0xaa,hud_length);
+        for (i=0;i<4;++i) draw_glyph(HUD_GAME_X+i*HUD_GAME_PITCH,bitmap_row(game_label[i][y]));
+        write_hud_span(XRAM_HUD+(uint16_t)(HUD_GAME_Y+y)*RIVER_WIDTH+HUD_GAME_X);
+    }
+    if (hud_pending) hud_pending=3;
+}
+#pragma code-name(pop)
+static void duo_hud(void)
+{
+    static uint8_t n,i,y,x,fuel,fill;
+    for (n=0;n<2;++n) {
+        duo_p=duo_players+n;
+        for (i=0;i<6;++i) hud_sprites[n*6+i].image=XRAM_SCORE_DIGITS+
+            (uint16_t)(duo_started ? duo_p->score[i]>>3 : i==5 ? 0 : 11)*32;
+        hud_sprites[12+n].image=XRAM_SCORE_DIGITS+(uint16_t)(duo_p->lives>>3)*32;
+        hud_sprites[17+n].y=duo_p->state==1 ||
+            ((duo_p->state==2 || duo_p->state==3) && (FRAME&16)) ? HUD_TOP+12 : -256;
+        fuel=duo_started ? duo_p->fuel_hi>>3 : 0;
+        if (hud_dirty || old_score[n]!=fuel) {
+            old_score[n]=fuel; x=4+n*80; fill=fuel;
+            hud_column=x; hud_length=44;
+            for (y=0;y<7;++y) {
+                memset(row+x,0x77,44);
+                if (y && y<6) {
+                    memset(row+x+1,0xaa,42);
+                    memset(row+x+2,0x88,fill+fill/3);
+                }
+                write_hud_span(XRAM_HUD+(uint16_t)(12+y)*RIVER_WIDTH+x);
+            }
+        }
+    }
+    hud_sprites[15].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)/10)*32;
+    hud_sprites[15].y=G(0xbd)>=10 ? HUD_TOP+27 : -256;
+    hud_sprites[16].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)%10)*32;
+    upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites)); hud_dirty=0;
 }
 static uint8_t configure_video(void)
 {
@@ -1361,6 +1487,10 @@ static uint8_t configure_video(void)
     xram0_set(XRAM_TILES+TERRAIN_BANK_SOLID*32,0xcc,32);
     for (i=0;i<128;++i) tia_palette[i]=tia_rgb(i*2);
     prepare_images(); refresh_palettes();
+    for (i=0;i<3;++i) {
+        write_jet_image((uint16_t)(i==0 ? rr_JetStraight : i==1 ? rr_JetMove : rr_JetExplode)-1);
+        xram0_read(row,JET_IMAGE,80); upload(XRAM_DUO_JETS+(uint16_t)i*80,row,80);
+    }
     shore_right=80;
     for (i=0;i<128;++i) {
         uint8_t phase=i&63,other=((phase>>3)+9)%24;
@@ -1391,43 +1521,12 @@ static uint8_t configure_video(void)
         }
         upload(XRAM_LOGO_IMAGE+y*30,row,30);
     }
-    for (i=0;i<HUD_SPRITE_COUNT;++i) {
-        hud_sprites[i].y=-256; hud_sprites[i].palette=XRAM_PALETTE;
-        hud_sprites[i].size=0x11; hud_sprites[i].options=0x42;
-        if (i>=3 && i<9) {
-            hud_sprites[i].x=(HUD_RECORD_X+(i-3)*8)*2; hud_sprites[i].y=HUD_TOP+HUD_SCORE_Y;
-            hud_sprites[i].palette=XRAM_HUD_BLACK_PALETTE;
-        } else if (i>=9 && i<18) {
-            hud_sprites[i].x=(88+(i-9)*8)*2; hud_sprites[i].image=XRAM_RESERVE_IMAGE;
-        }
-    }
-    hud_sprites[0].x=HUD_GAME_NUMBER_X*2; hud_sprites[0].y=HUD_TOP+HUD_GAME_NUMBER_Y;
-    hud_sprites[0].palette=XRAM_HUD_BLACK_PALETTE;
-    hud_sprites[1].x=(HUD_BRIDGE_NUMBER_X-8)*2;
-    hud_sprites[2].x=HUD_BRIDGE_NUMBER_X*2; hud_sprites[2].y=HUD_TOP+HUD_GAME_Y;
-    /* Preserve the logo bitmap while positioning it in the reference layout. */
-    hud_sprites[18].x=48; hud_sprites[18].y=HUD_FOOTER_Y;
-    hud_sprites[18].image=XRAM_LOGO_IMAGE; hud_sprites[18].palette=XRAM_LOGO_PALETTE;
-    hud_sprites[18].size=0x1e;
     for (y=0;y<16;++y) for (x=0;x<HUD_FUEL_WIDTH;++x)
         fuel_rows[y][x]=fuel_gauge[y][x]=='X' ? 0x77 : 0xaa;
-    hud_dirty=7;
-    upload(XRAM_HUD_BITMAP_CONFIG,&hud_bitmap,sizeof(hud_bitmap)); xram0_set(XRAM_HUD,0xaa,HUD_BYTES);
+    upload(XRAM_HUD_BITMAP_CONFIG,&hud_bitmap,sizeof(hud_bitmap));
     upload(XRAM_DEMO_FOOTER_CONFIG,&demo_footer,sizeof(demo_footer));
     xram0_set(XRAM_HUD+HUD_PANEL_HEIGHT*RIVER_WIDTH,0x77,(HUD_HEIGHT-HUD_PANEL_HEIGHT)*RIVER_WIDTH);
-    hud_label(HUD_HI_X,6,"HI",0x77);
-    hud_column=HUD_HI_X; hud_length=28; hud_ink=0xbb;
-    for (y=0;y<6;++y) {
-        memset(row+HUD_HI_X,0xaa,28);
-        for (i=0;i<4;++i) draw_glyph(HUD_HI_X+i*8,bitmap_row(bridge_label[y]+i*8));
-        write_hud_span(XRAM_HUD+(uint16_t)(HUD_GAME_Y+y)*RIVER_WIDTH+HUD_HI_X);
-    }
-    hud_column=HUD_GAME_X; hud_length=4*HUD_GAME_PITCH; hud_ink=0x77;
-    for (y=0;y<6;++y) {
-        memset(row+HUD_GAME_X,0xaa,hud_length);
-        for (i=0;i<4;++i) draw_glyph(HUD_GAME_X+i*HUD_GAME_PITCH,bitmap_row(game_label[i][y]));
-        write_hud_span(XRAM_HUD+(uint16_t)(HUD_GAME_Y+y)*RIVER_WIDTH+HUD_GAME_X);
-    }
+    hud_clear(); hud_layout();
     /* Prepare the entire first frame before enabling its planes. XRAM still
      * contains cover pixels, so even a partially initialized scene can flash. */
     upload(XRAM_TERRAIN_CONFIG,&terrain,sizeof(terrain));
@@ -1437,8 +1536,8 @@ static uint8_t configure_video(void)
     game_fade_prepare();
     if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
-        xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),SPRITE_COUNT-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
-        xreg(1,0,1,5,0x38,XRAM_SPRITES,1,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),21,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_SPRITES+22*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_DEMO_FOOTER_CONFIG,1,HUD_FOOTER_Y,HUD_FOOTER_Y+8)<0 ||
@@ -1449,7 +1548,7 @@ static uint8_t configure_video(void)
 /* Keep startup and the frame loop compact in the fixed Debug RAM map. */
 int main(int argc,char** argv)
 {
-    uint8_t last_vsync,now,delta,input,controls,old_offset,old_intro,scroll,y;
+    uint8_t last_vsync,now,delta,input,controls,old_offset,old_intro,old_variant,scroll,y;
     input=audio_options(argc,argv);
     if (input) return input==1 ? 0 : 2;
     RIA.step0=1; RIA.step1=1;
@@ -1470,6 +1569,7 @@ int main(int argc,char** argv)
 #ifdef RIVER_PROFILE
         timing_start=timing_stamp=(uint16_t)ria_attr_get(RIA_ATTR_CLK_RUN_MS);
 #endif
+        if (hud_pending) hud_layout();
         input=read_input(); if (input&QUIT) break;
         controls=(pressed(0x3a) ? 1 : 0)|(pressed(0x3b) ? 2 : 0)|
                  (pressed(0x3c) ? 4 : 0)|(pressed(0x3e) ? 8 : 0)|
@@ -1496,10 +1596,17 @@ int main(int argc,char** argv)
                 G(0x280)=255; G(0x22c)=G(0x22d)=128;
             }
             if (MODE==255) G(0xc0)=(uint16_t)rr_Space;
-            reflected=G(0xe0); collisions(); G(0xe0)=0;
+            reflected=G(0xe0);
+            if (VAR!=2 || ready || MODE) collisions();
+            G(0xe0)=0;
             PROFILE_PHASE(1);
-            old_offset=OFFSET; old_intro=MODE; rr_step(); ++ticks; reflected=G(0xe0);
-            if (tank_bonus && (G(0x282)&1)) rr_tank_bonus();
+            old_offset=OFFSET; old_intro=MODE; old_variant=VAR;
+            rr_step(); ++ticks; reflected=G(0xe0);
+            if (VAR!=2 && tank_bonus && (G(0x282)&1)) rr_tank_bonus();
+            if (!(G(0x282)&1) || old_variant!=VAR) {
+                duo_started=0; memset(duo_players,0,sizeof(duo_players));
+            }
+            if (old_variant!=VAR && (old_variant==2 || VAR==2)) {hud_clear(); hud_pending=1;}
             PROFILE_PHASE(2);
             if (!(G(0x282)&1) || (old_intro>=128 && MODE<128)) {
                 restart_terrain(); jet_cache=0xffff;

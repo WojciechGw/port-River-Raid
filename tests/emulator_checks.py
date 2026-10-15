@@ -481,6 +481,7 @@ def main():
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
+    parser.add_argument("--duo-only",action="store_true")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")
@@ -533,6 +534,12 @@ def main():
         print(f"All {count} audio checks passed.",flush=True)
         return
 
+    if args.duo_only:
+        from duo_checks import run_duo_checks
+        run_duo_checks(case,sym,boot,output)
+        print(f"All {count} DUO checks passed.",flush=True)
+        return
+
     # The native SELECT number belongs in GAME, not in P1/P2 or HI.
     # Check actual score pointers and the rendered record across both modes.
     zero_score = bytes([88]*5+[0])
@@ -540,7 +547,8 @@ def main():
     initial_scores = ["dump 0xcd 12", "dump 0xdd 12", "dump xram:0x0600 90"]
     _, buffers = case("scores-start-at-zero", boot + initial_scores + [
         "press f2", "run 3", "release f2", "run 3", "peek 0x80 1"] + initial_scores + [
-        "press f2", "run 3", "release f2", "run 3", "peek 0x80 0"] + initial_scores)
+        "press f2", "run 3", "release f2", "run 8", "peek 0x80 2",
+        "press f2", "run 3", "release f2", "run 8", "peek 0x80 0"] + initial_scores)
     for current, other, sprites in zip(buffers[::3],buffers[1::3],buffers[2::3]):
         assert current[::2] == other[::2] == zero_score, "P1/P2 inherited the GAME number"
         record = tuple(struct.unpack_from("<H",sprites,i*10+4)[0] for i in range(3,9))
@@ -1759,6 +1767,8 @@ def main():
     for _ in range(6):
         commands += ["press r f1", "run 4", "release r f1", "run 12"]
     case("restart-and-palette-performance", commands)
+    from duo_checks import run_duo_checks
+    run_duo_checks(case,sym,boot,output)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

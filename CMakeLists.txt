@@ -45,14 +45,15 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm ${RIVER_CORE}
+        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm ${RIVER_CORE}
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     target_include_directories(riverraid PRIVATE ${CMAKE_CURRENT_BINARY_DIR})
-    # Keep source symbols for DAP and memory fixtures even in optimized builds.
-    target_compile_options(riverraid PRIVATE -g)
+    # DUO and all audio backends share a fixed 64 KiB CPU map. Both presets
+    # need compact C code; retain source symbols for DAP and memory fixtures.
+    target_compile_options(riverraid PRIVATE -g "$<$<COMPILE_LANGUAGE:C>:-Oirs>")
     option(RIVER_PROFILE "Measure frame phases in XRAM (adds timing overhead)" OFF)
     if(RIVER_PROFILE)
         target_compile_definitions(riverraid PRIVATE RIVER_PROFILE)

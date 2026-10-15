@@ -26,7 +26,7 @@
 
 ; Present the prepared world immediately after VSYNC, before the VGA reaches
 ; RIVER_TOP. Only Y changes in the tile config; dimensions/data stay fixed.
-; 200 sprite bytes + Y take approximately 0.4 ms at 8 MHz. Never publish
+; 240 sprite bytes + Y take approximately 0.4 ms at 8 MHz. Never publish
 ; the scroll origin halfway through expensive terrain/collision processing.
 _present_frame:
     lda #1
@@ -45,10 +45,12 @@ _present_frame:
     sta RIA_ADDR0+1
     ldy #0
 @sprite:
+    .repeat 4
     lda _sprites,y
     sta RIA_RW0
     iny
-    cpy #200
+    .endrepeat
+    cpy #240
     bne @sprite
     lda #$62
     sta RIA_ADDR0

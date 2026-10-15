@@ -74,6 +74,10 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define XRAM_IMAGES 0x8000
 #define XRAM_SPRITE_PALETTES 0x0400
 #define XRAM_JET_PALETTE 0x0580
+#define XRAM_DUO_PALETTE 0x0584
+#define XRAM_DUO_JETS 0x6300
+/* Two packed duo_player_t snapshots, published with the normal diagnostics. */
+#define XRAM_DUO_STATE 0x00C0
 #define XRAM_HUD_BITMAP_CONFIG 0x0240
 #define XRAM_DEMO_FOOTER_CONFIG 0x0260
 #define XRAM_DEMO_FOOTER_IMAGE 0x3800
@@ -106,7 +110,7 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define TERRAIN_BANK_SOLID 7
 #define HUD_SPRITE_COUNT 19
 #define XRAM_RESERVE_IMAGE (XRAM_HUD_DIGITS + 12 * 32)
-#define SPRITE_COUNT 20
+#define SPRITE_COUNT 24
 #define OBJECT_IMAGE_COUNT 13
 #define BALLOON_ID 11
 #define TANK_ID 12
@@ -138,6 +142,9 @@ _Static_assert(XRAM_STEPPED_MOUNTAIN + IMAGE_BYTES <= XRAM_WIDE_MOUNTAIN, "Mount
 _Static_assert(XRAM_WIDE_MOUNTAIN + IMAGE_BYTES <= XRAM_BRIDGE_IMAGE, "Mountain overlaps bridge");
 _Static_assert(XRAM_LOGO_IMAGE + 240 <= XRAM_BRIDGE_IMAGE, "Logo overlaps bridge");
 _Static_assert(XRAM_BRIDGE_IMAGE + 48 * 32 / 2 <= XRAM_IMAGES, "Bridge overlaps sprites");
+_Static_assert(XRAM_BRIDGE_IMAGE + 48 * 32 / 2 <= XRAM_DUO_JETS, "Bridge overlaps DUO");
+_Static_assert(XRAM_DUO_JETS + 3 * 80 <= XRAM_IMAGES, "DUO overlaps images");
+_Static_assert(XRAM_DUO_STATE + 44 <= XRAM_PALETTE, "DUO state overlaps palette");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Mountain overlaps sprites");
 _Static_assert(XRAM_SMALL_MOUNTAIN + IMAGE_BYTES <= XRAM_DEMO_FOOTER_IMAGE, "Mountain overlaps demo footer");
 _Static_assert(XRAM_MEDIUM_MOUNTAIN + IMAGE_BYTES <= XRAM_IMAGES, "Medium mountain overlaps sprites");
