@@ -108,7 +108,6 @@ static const uint8_t tank_colors[3]={0,0x00,0x08};
 /* Native ship, top to bottom at block rows 16..23. X = opaque,
  * . = transparent. Each column is doubled horizontally by the renderer.
  * Preserve the native palette slots used by the two-row color bands. */
-#pragma rodata-name(push, "SPLASH")
 static const char ship_pixels[8][9]={
     "...X....",
     "...X....",
@@ -123,7 +122,6 @@ static const uint8_t ship_colors[16]={
     0,0x2a,0xac,0x9c,0x8c,0xba,0x32,0x00,
     0x00,0x20,0x14,0x12,0x14,0x12,0x00,0x00
 };
-#pragma rodata-name(pop)
 /* Tank rounds fly horizontally; white impact circles damage the jet.
  * W = white shell (impact palette), E = pale yellow destruction flash. */
 #pragma rodata-name(push, "SPLASH")
@@ -280,6 +278,8 @@ static const char tank_tracks_alt[2][3][10]={
  * Stored rows are sprite Y=7..27; the other rows are transparent.
  * . = transparent, B = brown, K = black, U = blue. */
 #define MOUNTAIN_VARIANTS 5
+/* Keep editable pixels here; the build stores them in 840 bytes, not 3360. */
+#if 0
 static const char mountain_pixels[MOUNTAIN_VARIANTS][21][32] = {
     {
         ".......................U........",
@@ -397,6 +397,8 @@ static const char mountain_pixels[MOUNTAIN_VARIANTS][21][32] = {
         "................................",
     },
 };
+#endif
+#include "mountains.h"
 /* Inward cuts in native land, in logical pixels. The shallow, irregular
  * teeth sample the long bank in Atari XL/image0.png (logical rows 41..104).
  * Indexed by world row,
@@ -501,13 +503,13 @@ static const char fuel_gauge[16][40] = {
     "X.XX...........XX..................XX.X",
     "X...............X....XX...............X",
     "X...............X...XX................X",
-    "X.XXXXX........XXX.XX...........XXXXX.X",
+    "X.XXXX.........XXX.XX...........XXXX..X",
     "X.X...............XX............X.....X",
     "X.X..............XX.XXX.........X.....X",
-    "X.XXXX..........XX....X.........XXXX..X",
+    "X.XXX...........XX....X.........XXX...X",
     "X.X............XX...XXX.........X.....X",
     "X.X.................X...........X.....X",
-    "X.XXXXX.............XXX.........X.....X",
+    "X.XXXX..............XXX.........X.....X",
     "X.....................................X",
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
 };

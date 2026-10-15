@@ -84,9 +84,13 @@ def generate(source):
                2251: 'STA    PF1Lst,X', 3066: 'InitTab:', 3510: 'LooseJet SUBROUTINE',
                1244: 'CPY    #ID_BRIDGE', 1246: 'LDA    frameCnt',
                1415: 'CMP    #ID_BRIDGE', 1574: 'LDA    ScoreTab,Y',
+               1590: 'CMP    #<Nine',
                2132: 'LDY    EnemyIdTab,X', 2133: '.newFuel:',
                2250: 'LDA    InitTab,X', 1409: '.checkCollisions:',
-               317: 'LDA    #<One', 1830: 'ADC    #DIGIT_H'}
+               317: 'LDA    #<One', 1830: 'ADC    #DIGIT_H',
+               1324: 'LDA    SWCHA', 1655: 'LDX    #MIN_MISSILE',
+               1666: 'DoSound:', 1819: 'EOR    #$01',
+               1809: 'STA    player', 1826: 'STA    player', 3610: 'LDA    gameVariation'}
     raw_lines = source.splitlines()
     for number, expected in anchors.items():
         if not raw_lines[number-1].strip().startswith(expected):
@@ -111,7 +115,8 @@ def generate(source):
     selected = [(n, code) for n,code in lines if any(a<=n<=b for a,b in ranges)]
     live_labels = {re.match(r"(\w+):", c)[1] for _,c in selected if re.match(r"(\w+):", c)}
     live_labels.add("MainLoop")
-    out += ['.include "longbranch.mac"', '.import _start_level, _ready']
+    out += ['.include "longbranch.mac"', '.import _start_level, _ready',
+            '.import _duo_tick, _duo_call, _duo_dead, _player_y']
     # All virtual hardware occupies reserved $0200-$02FF, away from cc65 ZP.
     native_io = {name: (0x200 + value if value < 0x100 else value) for name,value in VCS.items()}
     native_io["INPT4"] = 0x25C  # INPT4-$30 = $022C; player 2 is $022D.
@@ -126,6 +131,26 @@ def generate(source):
             'ID_BALLOON = 11 ; Picocomputer / 5200 extension']
     for number, code in selected:
         # Extend only the native copy; keep the 4096-byte reference unchanged.
+        if number == 1324:
+            out += ['LDA gameVariation', 'CMP #2', 'jne port_player_entry',
+                    'LDA _ready', 'ORA gameMode', 'jne port_player_entry',
+                    'JSR _duo_tick', 'JMP port_shared_sound', 'port_player_entry:']
+        if number == 1655:
+            # Store absolute screen missile coordinates at launch. Later
+            # throttle changes must not drag an already airborne missile.
+            code += '\nLDA _duo_call\nbeq port_missile_origin\nLDA #142+MIN_MISSILE\nSEC\nSBC _player_y\nTAX\nport_missile_origin:'
+        if number == 1590:
+            code = 'JSR port_life_limit'
+        if number == 1666:
+            code += '\nLDA _duo_call\nbeq port_shared_sound\nrts\nport_shared_sound:'
+        if number == 3510:
+            code += '\nPHA\nLDA _duo_call\nbeq port_native_death\nPLA\nLDA #1\nSTA _duo_dead\nrts\nport_native_death:\nPLA'
+        if number == 1819:
+            code = 'CLC\nADC #1\nCMP #3\nbcc port_select_store\nLDA #0\nport_select_store:'
+        if number in (1809, 1826):
+            code = 'AND #1\n' + code  # DUO always starts with native player slot zero.
+        if number == 3610:
+            code += '\nCMP #2\njeq local_SwapPlayers_skipSwap\nCMP #0'
         if number == 1409:
             # Attract mode uses native enemy movement and terrain generation,
             # without fuel consumption, player movement, shots or deaths.
@@ -181,6 +206,18 @@ def generate(source):
                                  "BMI":"jmi", "BPL":"jpl", "BVC":"jvc", "BVS":"jvs"}[m[0]], code)
         out.append(code)
     out += ['MainLoop: rts',
+            # Preserve A/X/Y and return comparison flags for both bonus paths.
+            'port_life_limit: PHA', 'LDA _duo_call', 'beq port_classic_life_limit',
+            'PLA', 'CMP #10*DIGIT_H', 'RTS',
+            'port_classic_life_limit: PLA', 'CMP #<Nine', 'RTS',
+            # Reuse native section selection on death, but do not swap pilots,
+            # subtract lives again, or reset either DUO score.
+            'port_duo_restart:', 'LDA #1', 'LDY #31', 'JSR LooseJet',
+            'LDX #shapePtr0+2-PF1Lst', 'JSR GameInit',
+            'TYA', 'ORA #PF_ROAD_FLAG', 'STA blockLstEnd',
+            'LDA randomLoSave', 'STA randomLo',
+            'LDA randomHiSave', 'STA randomHi',
+            'LDA #0', 'STA gameMode', 'STA speedY', 'RTS',
             'port_ScoreTab: .byte 0,0,0,0,$88,$30,$30,$18,$A8,0,$40,$30',
             # Award 250 in two decimal digits, preserving original reserve
             # increments and the original score-overflow/death sequence.
@@ -190,7 +227,7 @@ def generate(source):
             'LDA #2*DIGIT_H', 'LDX #6', 'JMP port_bonus_digit',
             'port_bonus_done: RTS',
             'port_bonus_digit:', 'PHA', 'CPX #2', 'jne port_bonus_score',
-            'LDA livesPtr', 'CMP #<Nine', 'jeq port_bonus_score',
+            'LDA livesPtr', 'JSR port_life_limit', 'jeq port_bonus_score',
             'jcc port_bonus_life', 'LDA #$FF',
             'port_bonus_life: ADC #DIGIT_H', 'STA livesPtr',
             'port_bonus_score: LDA scorePtr1,X', 'CMP #<Space', 'jne port_bonus_add',
@@ -206,11 +243,14 @@ def generate(source):
             '_rr_step = native::local_DisplayState_frame_step',
             '.export _rr_tank_bonus, _rr_tank_crash',
             '_rr_tank_bonus = native::port_tank_bonus',
-            '_rr_tank_crash = native::port_tank_crash']
+            '_rr_tank_crash = native::port_tank_crash',
+            '.export _rr_duo_player', '_rr_duo_player = native::port_player_entry',
+            '.export _rr_duo_restart', '_rr_duo_restart = native::port_duo_restart']
     for label in ('shapePtr1aTab', 'shapePtr1bTab', 'ColorPtrTab', 'ColorTab',
                   'RoadColorTab', 'FuelTab0', 'FuelTab1', 'FuelTab2', 'FuelTab3',
                   'FuelTab4', 'ENABLTab', 'Copyright1', 'Copyright2',
-                  'Copyright3', 'Copyright4', 'Copyright5', 'Space', 'Copyright0', 'Zero'):
+                  'Copyright3', 'Copyright4', 'Copyright5', 'Space', 'Copyright0', 'Zero',
+                  'JetStraight', 'JetMove', 'JetExplode'):
         out += [f'.export _rr_{label}', f'_rr_{label} = reference::{label}-$3000']
     return "\n".join(out) + "\n"
 

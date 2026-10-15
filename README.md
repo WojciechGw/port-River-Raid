@@ -43,6 +43,22 @@ pitch, and explosions have a low body rather than metallic percussion.
 Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
+GAME 3 DUO lets P1 and P2 fly together, with separate scores, fuel and lives.
+Each pilot can hold up to ten lives, shown as two rows of five plane icons
+beside their fuel gauge.
+P1 uses the keyboard; the first gamepad controls P2 (WASD/left Ctrl also work).
+Scrolling follows the average speed of the active planes. Each plane's throttle
+also changes its vertical position: a faster pilot gains distance over time,
+up to four plane heights (72 logical pixels). The rate of gaining distance is
+proportional to the speed difference; equal speeds preserve the earned lead.
+Shots do not hurt the other pilot, but a plane-to-plane collision kills both.
+A fallen pilot with spare lives returns after the survivor passes the next
+bridge, once a safe spawn position is available. Losing both planes restarts
+the current stage with scores and remaining lives preserved. Each destroyed
+plane costs one life; restarting does not charge another. A pilot with no lives
+stays eliminated; the game ends when neither pilot has lives left.
+Select GAME 3 with F2 and start with Space or Enter.
+
 ## Building and running
 
 Requirements: CMake 3.21+, Ninja, Python 3, and cc65 with the `rp6502` target.
@@ -79,8 +95,8 @@ cmake --build --preset cc65/Release
 The artifact name `riverraid` retains the project's existing target name.
 In VS Code, select the `cc65/Release` preset, the `riverraid` target, and the
 `RP6502-EMU` launch configuration. F5 starts the emulator with debugger support.
-Source symbols are also available in Release. `cc65/Debug` provides unoptimized
-builds; use Release for performance measurements.
+Source symbols are available in both presets. Both use compact optimized C
+code to fit the 64 KiB memory map, including GAME 3 DUO.
 
 The port uses ca65. The llvm-mos presets from the old template are currently
 unsupported by the port's code. The BASIC branch remains a template example.
@@ -92,11 +108,12 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | Arrow keys | Player 1: movement; Up accelerates, Down slows down |
 | WASD, left Ctrl | Player 2: movement and firing; also control player 1 in single-player games |
 | Space or Enter | Fire; start a game or restart after game over |
-| F1 | Color / black and white |
-| F2 | SELECT: one-player or two-player variation |
+| F1 | Instructions (any key returns to the game) |
+| F2 | SELECT: GAME 1 solo, GAME 2 alternating, GAME 3 DUO |
 | F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
+| F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
-| F6 | Player 2: guided or straight missiles |
+| F8 | Player 2: guided or straight missiles |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |
@@ -106,19 +123,22 @@ four face buttons fire, Start pauses, and Select starts a new game. Flying
 over a fuel tank refuels the plane; shooting the tank awards points.
 A balloon awards 60 points, a tank on the road or bank 250, a bridge 500,
 and a bridge with a tank 750. Scrolling into the next section increases the level.
-In two-player games, players switch after losing a plane.
+In GAME 2, players switch after losing a plane; GAME 3 is simultaneous.
 
 In attract mode, the footer scrolls a light gray caption containing the game
 title, author, copyright dates, Activision logo, and instructions for starting.
 At startup, the program first displays `assets/cover.bmp` with a smooth fade in
 (about one second). Any key starts the fade out; once it finishes and the key
-is released, the game screen appears. The cover retains its 320×180 aspect
-ratio and is centered on a black background.
+is released, `assets/manual.bmp` fades in. The instructions wait for another
+key with the blinking message "PRESS ANY KEY TO START THE GAME", then fade out
+and open the existing mode-selection/demo screen. Each dismissal key must be
+released before continuing. Both images retain their 320×180 aspect ratio
+and are centered on a black background.
 A small white "PRESS ANY KEY" message blinks below the image, visible for half
 a second and hidden for half a second. The cover and its palettes are named
 assets in the `.rp6502` file, loaded from `ROM:cover.bin` and `ROM:cover-fade.bin`;
 the message bitmap is loaded from `ROM:cover-prompt.bin`.
-Escape displays the same image with a fade in and the white message
+Escape displays `assets/outro.bmp` with a fade in and the white message
 "SEE YOU NEXT TIME!". After three seconds at full brightness, the image fades
 out completely before the program exits. Held keys do not interrupt this screen.
 The entire game screen fades in from black over about one second, including
@@ -150,12 +170,12 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.
 - `src/riverraid.asm`: fast scanline transfers and sprite/terrain collisions.
-- `src/cover.asm`: cover display, fades, and waiting for a key.
+- `src/cover.asm`: cover, instructions and outro display, fades, and key handling.
 - `src/riverraid.cfg`: RAM layout with the original game's zero page reserved.
 - `src/xram.h`: XRAM layout and PIX structures checked at compile time.
 - `tools/port_original.py`: automatic DASM-to-ca65 translation and selection
   of the original routines. Generates `original_core.asm` in the build directory.
-- `tools/make_cover.py`: converts `assets/cover.bmp` and prepares fade palettes.
+- `tools/make_cover.py`: converts cover/manual/outro BMPs and prepares fade palettes.
 - `tools/preview_audio.py`: offline PCM/PSG listening previews from captured parameters.
 - `tools/preview_synth.py`: PSG/OPL register-trace WAV previews and spectral/Haar measurements.
 - `tools/compare_synth.py`: preview signal checks and an optional RMS-matched XL/XE comparison.

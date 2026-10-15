@@ -35,7 +35,8 @@ respawning and player switching preserve each player's current section.
 In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
 image remains unchanged. Missile guidance is toggled independently with
-F5 for player 1 and F6 for player 2. F4 has no game function.
+F5 for player 1 and F8 for player 2. F4 toggles color/black and white.
+F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
 they replace some randomly generated enemies, moving and bouncing off the
@@ -182,7 +183,8 @@ the same typeface as the score.
 Field positions follow the supplied layout: GAME on the left, the fuel gauge
 beside it, and BRIDGE above the reserve icons. The fuel gauge frame with E,
 F, and 1/2 is a readable 39×16 bitmap in `src/graphics.h`; the yellow indicator
-depends on the current fuel level.
+depends on the current fuel level. In GAME 1 and GAME 2 the gauge always
+starts at logical X=45, both before starting and during play.
 Five mountain variants replace the house and tree from the 2600 version.
 Two were reconstructed from `original/Atari XL/image0.png`: a tall mountain
 range with blue slopes and lower brown peaks with black ridges. The third is
@@ -247,20 +249,38 @@ before fade out.
 After fade in, the program waits for any HID key, including function keys
 and modifiers; LED status bits do not dismiss the cover. The dismissal key
 is consumed through its release so it cannot also trigger game controls.
+After releasing the cover key, the same helper opens `manual.bin` and
+`manual-fade.bin`, generated from `assets/manual.bmp`. The instructions fade
+in, wait for a separate key press, fade out, and wait for key release before
+initializing the existing mode-selection/demo screen. `manual-prompt.bin`
+contains "PRESS ANY KEY TO START THE GAME", centered at X=64, Y=222 in a
+192x8 bitmap at $0900, with the same blinking timing and white/black palette.
+XRAM $00B4 identifies the current scene: 0 cover, 1 outro, 2 manual.
+F1 also opens this manual during play or the demo. The simulation and audio
+stop until the closing key is released; an existing pause remains active.
+Holding F1 does not dismiss its own screen. Before loading the image, the
+host saves terrain base colors at $F100 and live video data ($0100-$07FF)
+at $F200-$F8FF, above the last manual pixel. On return it rebuilds static
+graphics and terrain from the preserved CPU collision edges, restores
+palettes/descriptors and redraws the HUD without advancing game logic.
+The VSYNC baseline is reset so time spent in help is not counted as dropped
+game frames. Audio is reinitialized using the selected backend.
 The cover helpers and tank extension code/state share free CPU memory from
 $D000 through $FEFF, after the original ROM and before the reserved I/O page,
-without taking space reserved for the stack or game
-buffers. After fade out, the program restores the footer strip from a ROM
-asset, and game initialization restores the remaining assets in the reused XRAM.
+with scene tables in RODATA and small writable state in DATA below the
+reference ROM. After the manual fades out, the program restores the footer
+strip from a ROM asset, and game initialization restores the remaining assets
+in the reused XRAM.
 Escape stops audio before reusing the cover's XRAM and palette for the farewell
-screen. The same fade helper reads `outro-prompt.bin` into $0900 and centers its
+screen, loading `outro.bin` and `outro-fade.bin` from `assets/outro.bmp`.
+The same fade helper reads `outro-prompt.bin` into $0900 and centers its
 112x8 bitmap at X=104, Y=222. "SEE YOU NEXT TIME!" remains visible for 180 VSYNCs
 after fade in, without blinking or responding to keys. Fade out ends on black;
 one final VSYNC displays it before returning to the console, even with Escape held.
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
-After the cover closes, `src/fade.c` and `src/fade.asm` fade in the entire
+After the manual closes, `src/fade.c` and `src/fade.asm` fade in the entire
 game screen over 64 VSYNCs (about one second). All 288 palette entries are
 saved in XRAM $D000 and scaled into staging at $D300. Each RGB555 channel
 uses 32 brightness steps, preserving the transparency bit. Palettes start
@@ -468,3 +488,64 @@ Listening tests, frame-by-frame raster comparisons with an Atari emulator,
 and testing on physical RP6502 hardware remain outstanding. Game logic
 behavior is preserved by using the original routines; exact visual and
 audio equivalence is not yet claimed.
+
+## GAME 3 DUO flight positions
+
+DUO runs the shared world once, then the native player rules in two separate
+contexts (`src/duo.h`, `src/duo.inc`, `src/duo.asm`). Each context now includes
+its own screen Y. Relative distance accumulates the difference of native
+velocities (speed / 128 logical pixels per step) in a signed fixed-point
+accumulator. Its limit is +/-72 pixels, or four 18-row plane heights.
+The pair starts at Y=106 and moves around that center, remaining within
+Y=70..142. Equal speeds preserve the accumulated lead; reversing the speed
+difference starts closing it immediately, including at the limit.
+The rendered position is the position used for collisions in that step;
+native acceleration takes effect in the following step. A sole survivor
+keeps its altitude and sets the scrolling speed. With both pilots alive,
+world scrolling still uses the mean speed.
+
+Player masks, enemy projectiles, tank splashes, refuelling and mutual plane
+collisions use each pilot's Y. The missile launch hook translates that Y into
+the native absolute missile coordinate, so subsequent throttle changes do not
+move an airborne missile. The first pilot passing a bridge marks it as passed;
+when a pilot is waiting, passage follows the sole survivor. This remains latched
+while that bridge moves through the lower blocks, so changing speed or losing
+the trailing plane cannot count an already passed bridge again.
+Respawns use the survivor's speed and the fallen pilot's last altitude,
+preserving the earned separation and the survivor's position. The spawn
+checks terrain, enemies and the partner at that altitude.
+
+When no plane remains in flight, the explosion runs for 32 ticks before
+restarting the current section if either pilot still has lives. Lives are
+charged only by `duo_kill`, never by the restart. `rr_duo_restart` reuses the
+native death checkpoint selection and partial `GameInit`: it restores the
+section RNG, including rollback of a section generated ahead of the planes,
+without swapping players or resetting scores. The host rebuilds terrain and
+clears tanks and helicopter shots before attempting safe spawns. Both heights
+return to Y=106 with zero relative lead and full fuel. Empty life pools remain
+eliminated; only two empty pools produce game over.
+
+DUO labels, score digits, reserve icons and fuel fills follow their
+pilot's plane color, including the
+black-and-white switch. Dedicated HUD palettes keep BRIDGE and its number
+in the GAME 1 colors. Returning to the classic panel stages its labels and
+sprites separately from the score/fuel bitmap to stay within the frame budget.
+Both DUO fuel gauges share GAME 1's `fuel_gauge`/`fuel_rows` artwork and
+39-by-16 dimensions, at HUD row 10. Their colored fills shrink across the
+37-column interior behind the opaque artwork. An assembly row copier applies
+the fill and mask together. At most one complete gauge is redrawn per frame;
+the second changed value remains pending for the next frame. SELECT completes
+its world reset before the replacement HUD layout begins.
+The GAME and BRIDGE labels start at the fuel gauges' X=4 and X=84, at Y=28.
+DUO reserves use the GAME 1 plane bitmap, with five icons per row at X=44/124
+and a seven-column pitch. The rows start at Y=10 and Y=19, leaving one blank
+scanline between eight-row icons. Twenty sprite records at XRAM $6400 use
+HUD plane 2; only changed visibility coordinates are updated. The DUO bonus
+life limit is ten (encoded as 80); both native scoring and tank bonuses use
+the same limit comparison, while GAME 1/2 keep their original limit of nine.
+
+Eight-column enemy collisions compare bitmap rows directly to keep two
+simultaneous collisions within the frame budget. The readable mountain art
+remains in `src/graphics.h`; `tools/pack_mountains.py` generates the two-bit
+`mountains.h` table at build time (840 instead of 3360 bytes), preserving all
+pixels and providing space for the added DUO code.
