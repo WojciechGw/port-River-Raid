@@ -33,15 +33,23 @@ typedef struct {
 #define XRAM_STATE 0x0080
 /* Optional RIVER_PROFILE maxima; see tests/README.md. */
 #define XRAM_TIMING 0x00A0
-/* Cover/outro state: phase (0 game, 1 in, 2 wait, 3 out, 4 black), level 0..63.
+/* Cover/manual/outro state: phase (0 game, 1 in, 2 wait, 3 out, 4 black), level 0..63.
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
  * pixels before game initialization and after audio stops on exit. */
 #define XRAM_COVER_STATE 0x00B0
+/* Scene: 0 cover, 1 outro, 2 manual. */
+#define XRAM_COVER_SCENE 0x00B4
+/* F1 return data, above the last manual pixel ($F0FF). */
+#define XRAM_HELP_TERRAIN_COLORS 0xF100
+#define XRAM_HELP_VIDEO 0xF200
+#define HELP_VIDEO_BYTES 0x700
+_Static_assert(XRAM_HELP_TERRAIN_COLORS + 192 <= XRAM_HELP_VIDEO, "Help backup overlaps");
+_Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= 65536UL, "Help backup exceeds XRAM");
 /* Game fade: level 0 black .. 32 full, then VSYNC; startup-only scratch. */
 #define XRAM_GAME_FADE_LEVEL 0x00B2
 #define XRAM_GAME_FADE_SOURCE 0xD000
 #define XRAM_GAME_FADE_STAGING 0xD300
-/* Cover/outro text; these regions hold terrain during gameplay. */
+/* Cover/manual/outro text; these regions hold terrain during gameplay. */
 #define XRAM_COVER_PROMPT_CONFIG 0x02A0
 #define XRAM_COVER_PROMPT_IMAGE 0x0800
 #define XRAM_COVER_PROMPT_PALETTE 0x0850

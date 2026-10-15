@@ -482,6 +482,8 @@ def main():
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
     parser.add_argument("--duo-only",action="store_true")
+    parser.add_argument("--screens-only",action="store_true")
+    parser.add_argument("--controls-only",action="store_true")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")
@@ -512,8 +514,10 @@ def main():
         print(f"PASS {name}", flush=True)
         return process.stdout, dumps
 
-    dismiss_cover = ["wait xram:0x00b0 2 180", "press z", "run 3", "release z",
-                     "wait xram:0x00b0 0 120"]
+    leave_cover = ["wait xram:0x00b0 2 180", "press z", "run 3", "release z"]
+    dismiss_manual = ["wait xram:0x00b4 2 120", "wait xram:0x00b0 2 90",
+                      "press z", "run 3", "release z", "wait xram:0x00b0 0 120"]
+    dismiss_cover = leave_cover + dismiss_manual
     title = dismiss_cover + ["wait xram:0x0080 82 240", "wait xram:0x00b2 32 90", "run 2", "peek xram:0x0080 0x52 3 3"]
     boot = title + [f'wait 0x{sym["ready"]:04x} 2 180', "run 60",
                     "peek xram:0x0080 0x52 3 3"]
@@ -528,6 +532,12 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    if args.controls_only:
+        from help_checks import run_help_checks
+        run_help_checks(case,sym,boot,output)
+        print(f"All {count} control/help checks passed.",flush=True)
+        return
 
     if args.audio_only:
         run_audio_checks(case,sym,fixture,resume,start,output)
@@ -557,12 +567,23 @@ def main():
     # Cover pixels and RGB555 endpoints are checked directly against the BMP,
     # not just the converter's output. Check every displayed fade step and
     # that holding a gameplay key across dismissal cannot start the game.
-    bmp=(ROOT / "assets/cover.bmp").read_bytes()
-    offset=struct.unpack_from("<I",bmp,10)[0]
-    dib,w,h,_,_=struct.unpack_from("<IiiHH",bmp,14)
-    rows=[bmp[offset+y*320:offset+(y+1)*320] for y in range(abs(h))]
-    expected_pixels=b"".join(reversed(rows) if h>0 else rows)
-    rgb=[tuple(v>>3 for v in bmp[14+dib+i*4:17+dib+i*4]) for i in range(256)]
+    def bitmap_source(name):
+        bmp=(ROOT / f"assets/{name}.bmp").read_bytes()
+        offset=struct.unpack_from("<I",bmp,10)[0]
+        dib,w,h,_,_=struct.unpack_from("<IiiHH",bmp,14)
+        rows=[bmp[offset+y*320:offset+(y+1)*320] for y in range(abs(h))]
+        pixels=b"".join(reversed(rows) if h>0 else rows)
+        colors=struct.unpack_from("<I",bmp,46)[0] or 256
+        rgb=[tuple(v>>3 for v in bmp[14+dib+i*4:17+dib+i*4]) for i in range(colors)]
+        rgb.extend([(0,0,0)]*(256-colors))
+        def palette(level):
+            return b"".join(struct.pack("<H", (r*level//63) | ((g*level//63)<<6) |
+                         ((b*level//63)<<11) | 32) for b,g,r in rgb)
+        return pixels,palette
+
+    expected_pixels,cover_palette=bitmap_source("cover")
+    manual_pixels,manual_palette=bitmap_source("manual")
+    outro_pixels,outro_palette=bitmap_source("outro")
     # Use the SDK's ROM parser to verify these are named files inside the
     # cartridge, loaded on demand rather than prepopulated XRAM chunks.
     sys.path.insert(0,str(ROOT / "tools"))
@@ -574,11 +595,11 @@ def main():
     assert assets["cover-fade.bin"]==(build / "cover_fade.bin").read_bytes()
     assert assets["cover-prompt.bin"]==(build / "cover_prompt.bin").read_bytes()
     assert assets["outro-prompt.bin"]==(build / "outro_prompt.bin").read_bytes()
+    for name,pixels in (("manual",manual_pixels),("outro",outro_pixels)):
+        assert assets[f"{name}.bin"]==pixels
+        assert assets[f"{name}-fade.bin"]==(build / f"{name}_fade.bin").read_bytes()
+    assert assets["manual-prompt.bin"]==(build / "manual_prompt.bin").read_bytes()
     assert not any(0x11000<=a<0x1f100 for a in rom.data), "Cover was preloaded to XRAM"
-
-    def cover_palette(level):
-        return b"".join(struct.pack("<H", (r*level//63) | ((g*level//63)<<6) |
-                     ((b*level//63)<<11) | 32) for b,g,r in rgb)
 
     commands=["wait xram:0x00b0 1 180"]
     for level in range(1,64):
@@ -594,7 +615,7 @@ def main():
         if level==32:
             commands += [f'shot "{(output / "cover-half.png").as_posix()}"']
     commands += ["wait xram:0x00b0 4 3", "run 2", "mark", "run 20", "expect-same",
-        f'shot "{(output / "cover-black.png").as_posix()}"', "release space",
+        f'shot "{(output / "cover-black.png").as_posix()}"', "release space"] + dismiss_manual + [
         "wait xram:0x0080 82 240", "run 2", f'peek 0x{sym["ready"]:04x} 1',
         f'peek 0x{sym["start_level"]:04x} 1', "peek xram:0x008b 0"]
     _, buffers=case("cover-fades-and-wait",commands)
@@ -612,7 +633,7 @@ def main():
         f'shot "{(output / "cover-prompt-off.png").as_posix()}"',
         "dump xram:0x0400 512", "run 30", "expect-same", "peek xram:0x02a4 222 0",
         "press q", "wait xram:0x00b0 3 3", "peek xram:0x02a4 0 255",
-        "release q", "wait xram:0x0080 82 240", "run 2"])
+        "release q"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2"])
     config,bitmap,palette,colors_on,colors_off=buffers
     assert struct.unpack("<BBhhhhHH",config)==(0,0,120,222,80,8,0x0800,0x0850)
     assert bitmap==assets["cover-prompt.bin"] and any(bitmap) and not any(bitmap[-10:])
@@ -623,19 +644,46 @@ def main():
     # before fade-in; consumed keys must not trigger the game controls.
     for key in ("q","f3","p","escape","lctrl"):
         case(f"cover-key-{key}",["wait xram:0x00b0 2 180", f"press {key}", "run 3",
-            f"release {key}", "wait xram:0x0080 82 240", "run 2",
+            f"release {key}"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2",
             f'peek 0x{sym["ready"]:04x} 1', f'peek 0x{sym["start_level"]:04x} 1',
             "peek xram:0x008b 0"])
     case("cover-held-before-fade",["press enter", "wait xram:0x00b0 3 180",
         "wait xram:0x00b0 4 90", "run 3", "peek xram:0x0080 0",
-        "release enter", "wait xram:0x0080 82 240", "run 2",
+        "release enter"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2",
         f'peek 0x{sym["ready"]:04x} 1'])
     for fill in ("0","255"):
         case(f"cover-wait-fill-{fill}",["wait xram:0x00b0 2 180", "run 2", "mark",
             "run 120", "expect-same", "peek xram:0x00b0 2", "peek xram:0x00b1 63"],
             fill=fill,gameplay=False)
 
-    # Exit reuses the cover and both fades, holds the farewell for exactly
+    # Instructions have independent pixels/palettes and consume their own key.
+    commands = leave_cover + ["wait xram:0x00b4 2 120", "wait xram:0x00b0 1 10"]
+    for level in range(1,64):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+    commands += ["wait xram:0x02a4 222 3", "dump xram:0x1000 57600",
+        "dump xram:0x02a0 14", "dump xram:0x0900 192", "run 2", "mark",
+        "run 240", "expect-same", "peek xram:0x00b4 2", "peek xram:0x00b0 2",
+        f'shot "{(output / "manual-full.png").as_posix()}"',
+        "press space", "wait xram:0x00b0 3 3"]
+    for level in reversed(range(64)):
+        commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+    commands += ["wait xram:0x00b0 4 3", "run 20", "peek xram:0x0080 0",
+        "release space", "wait xram:0x0080 82 240", "run 2",
+        f'peek 0x{sym["ready"]:04x} 1']
+    _,buffers=case("manual-fades-and-wait",commands)
+    assert buffers[:63]==[manual_palette(i) for i in range(1,64)]
+    assert buffers[63]==manual_pixels
+    assert struct.unpack("<BBhhhhHH",buffers[64])==(0,0,64,222,192,8,0x0900,0x0850)
+    assert buffers[65]==assets["manual-prompt.bin"] and any(buffers[65])
+    assert buffers[66:]==[manual_palette(i) for i in reversed(range(64))]
+    for key in ("q","f3","p","escape","lctrl"):
+        case(f"manual-key-{key}",leave_cover+[
+            "wait xram:0x00b4 2 120", "wait xram:0x00b0 2 90",
+            f"press {key}", "run 3", f"release {key}",
+            "wait xram:0x0080 82 240", "run 2", f'peek 0x{sym["ready"]:04x} 1',
+            f'peek 0x{sym["start_level"]:04x} 1', "peek xram:0x008b 0"])
+
+    # Exit uses its own image/palette, holds the farewell for exactly
     # 180 VSYNCs, and ignores held keys until it has displayed a black frame.
     commands = pause + ["press escape", "wait xram:0x00b0 1 90",
                         "peek xram:0x02a4 0 255"]
@@ -656,18 +704,22 @@ def main():
     commands += ["wait xram:0x00b0 4 3",
         f'shot "{(output / "outro-black.png").as_posix()}"', "expect-exit 0 5"]
     _, buffers = case("outro-fades-hold-and-exit",commands,gameplay=False)
-    assert buffers[:63]==[cover_palette(i) for i in range(1,64)], "Outro fade in differs from the cover"
+    assert buffers[:63]==[outro_palette(i) for i in range(1,64)], "Outro fade in differs from its BMP"
     config,pixels,message_config,message,message_palette=buffers[63:68]
     assert struct.unpack("<BBhhhhHH",config)==(0,0,0,30,320,180,0x1000,0x0400)
-    assert pixels==expected_pixels, "Outro does not display the startup image"
+    assert pixels==outro_pixels, "Outro does not display assets/outro.bmp"
     assert struct.unpack("<BBhhhhHH",message_config)==(0,0,104,222,112,8,0x0900,0x0850)
     assert message==assets["outro-prompt.bin"] and any(message) and not any(message[-14:])
     assert message_palette==struct.pack("<HH",32,0xffff), "Farewell text is not white on black"
-    assert buffers[68:]==[cover_palette(i) for i in reversed(range(64))], "Outro fade out differs from the cover"
+    assert buffers[68:]==[outro_palette(i) for i in reversed(range(64))], "Outro fade out differs from its BMP"
     for backend in ("opl2","psg","pcm"):
         case(f"outro-{backend}-held-escape",start+["press escape","expect-exit 0 480"],
              rom_args=("/"+backend,),gameplay=False)
     case("outro-attract-held-escape",boot+["press escape","expect-exit 0 480"],gameplay=False)
+
+    if args.screens_only:
+        print(f"All {count} screen checks passed.",flush=True)
+        return
 
     # Staging must not alter the live VGA descriptors until the next VSYNC.
     # The renderer then prepares the following frame; it must not overwrite
@@ -1648,8 +1700,8 @@ def main():
         "run 4", "press p up", "run 3", "release p up", "run 3"] + dump)
     assert states[-1][24:26] == bytes([0x29,0x50])
 
-    case("black-and-white-switch", boot + ["mark", "press f1", "run 4",
-        "release f1", "run 4", "peek 0x86 15", "expect-changed"])
+    case("black-and-white-switch", boot + ["mark", "press f4", "run 4",
+        "release f4", "run 4", "peek 0x86 15", "expect-changed"])
     case("screensaver-and-input", fixture + [poke(0xf7,128)] + resume + [
         "peek 0x86 247", "press right", "run 4", "release right", "run 3", "peek 0x86 255"])
     _, states = case("bridge-difficulty-advance-50", fixture + [poke(0xbd,49), poke(0xb9,1),
@@ -1716,18 +1768,18 @@ def main():
              ["peek xram:0x0082 1","peek xram:0x0088 0"])
 
     _, switches = case("function-key-mapping", fixture + ["dump 0x0282 1",
-        "press f4", "run 3", "release f4", "run 3", "dump 0x0282 1",
+        "press f6", "run 3", "release f6", "run 3", "dump 0x0282 1",
         "press f5", "run 3", "dump 0x0282 1", "run 60", "dump 0x0282 1",
         "release f5", "run 3",
-        "press f6", "run 3", "dump 0x0282 1", "run 60", "dump 0x0282 1",
-        "release f6", "run 3", "press f5", "run 3", "release f5", "run 3",
-        "dump 0x0282 1", "press f6", "run 3", "release f6", "run 3",
+        "press f8", "run 3", "dump 0x0282 1", "run 60", "dump 0x0282 1",
+        "release f8", "run 3", "press f5", "run 3", "release f5", "run 3",
+        "dump 0x0282 1", "press f8", "run 3", "release f8", "run 3",
         "dump 0x0282 1", "peek xram:0x008b 1"])
     assert [state[0] for state in switches] == [0x0b,0x0b,0x4b,0x4b,0xcb,0xcb,0x8b,0x0b], \
-        "F5/F6 must toggle P1/P2 guidance independently once per press; F4 must remain inactive"
+        "F5/F8 must toggle P1/P2 guidance independently once per press; F6 must remain inactive"
 
     for player in (0,1):
-        key = "f6" if player else "f5"
+        key = "f8" if player else "f5"
         for hard in (False, True):
             commands = fixture + [poke(0xf4,player),poke(0x80,player),
                 poke(0xb2,50),poke(0xf5,40),poke(0xb3,90)]
@@ -1772,10 +1824,12 @@ def main():
     # together. Exercise that combination after some gameplay, repeatedly.
     commands = start + ["press up space", "run 600", "release up space", "run 4"]
     for _ in range(6):
-        commands += ["press r f1", "run 4", "release r f1", "run 12"]
+        commands += ["press r f4", "run 4", "release r f4", "run 12"]
     case("restart-and-palette-performance", commands)
     from duo_checks import run_duo_checks
     run_duo_checks(case,sym,boot,output)
+    from help_checks import run_help_checks
+    run_help_checks(case,sym,boot,output)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

@@ -13,7 +13,12 @@ Scenariusze `cover-*` porównują bitmapę z `assets/cover.bmp`, sprawdzają
 wszystkie poziomy palety fade in/out oraz zachowanie okładki podczas
 oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
 i napisu oraz brak automatycznego wczytywania okładki do XRAM.
-`outro-fades-hold-and-exit` sprawdza ten sam obraz po Esc, wszystkie poziomy
+`python tests/emulator_checks.py --screens-only` uruchamia testy plansz.
+`manual-fades-and-wait` sprawdza obraz z `assets/manual.bmp`, wszystkie poziomy
+fade in/out, napis PRESS ANY KEY TO START THE GAME oraz oczekiwanie na osobny
+klawisz. `manual-key-*` sprawdzają różne klawisze i ich zużycie przed ekranem
+wyboru trybu.
+`outro-fades-hold-and-exit` sprawdza `assets/outro.bmp` po Esc, wszystkie poziomy
 obu fade, napis SEE YOU NEXT TIME!, pełne 180 klatek i wyjście dopiero po czerni.
 Test utrzymuje Esc i inne klawisze; napis pozostaje nieruchomy i nie miga.
 `outro-*-held-escape` sprawdzają wyjście z pokazu i z gry oraz zatrzymanie
@@ -74,7 +79,11 @@ wypełnioną zerami, $FF i losowo. Klawisz zamykający okładkę nie może uruch
 sterowania grą. Zrzuty `cover-full.png`, `cover-half.png` i `cover-black.png`
 pokazują kolejne fazy. Pozostałe scenariusze zamykają okładkę przed testowaniem gry.
 `function-key-mapping` sprawdza niezależne przełączanie sterowania pociskiem
-przez F5 (P1) i F6 (P2), brak powtarzania przy przytrzymaniu oraz brak funkcji F4.
+przez F5 (P1) i F8 (P2), brak powtarzania przy przytrzymaniu oraz brak funkcji F6.
+`python tests/emulator_checks.py --controls-only` sprawdza F4 (kolorystyka),
+F5/F8 i instrukcję pod F1. Testy powrotu porównują stan gry, teren, HUD,
+samoloty i palety przed i po instrukcji we wszystkich trzech trybach.
+Obejmują przytrzymane F1, ponowne otwarcie, zachowanie pauzy oraz backendy audio.
 Scenariusze `bridge-difficulty-*` sprawdzają cykl F3: 1 → 5 → 20 → 50 → 1,
 brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD, restart z pauzy,
 zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 50.
@@ -236,7 +245,8 @@ cyfr, dlatego protokół nie przechowuje go jako liczby 32-bitowej.
 Pierwszy bajt określa fazę: 1 rozjaśnianie, 2 oczekiwanie na klawisz,
 3 wygaszanie, 4 czerń i oczekiwanie na zwolnienie klawisza, 0 przejście do gry.
 Drugi bajt to wyświetlany poziom jasności 0–63. Sygnatura gry w `$0080`
-pozostaje zerowa do przygotowania pierwszej planszy.
+pozostaje zerowa do przygotowania pierwszej planszy. Bajt `$00B4` określa
+wyświetlany obraz: 0 okładka, 1 outro, 2 instrukcja.
 
 ## Opcjonalny profil czasu
 

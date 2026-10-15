@@ -4,7 +4,7 @@
 .include "cover.inc"
 .macpack longbranch
 .importzp ptr1
-.export _show_cover, _show_outro
+.export _show_cover, _show_outro, _show_manual
 .segment "SPLASH"
 
 COVER_CONFIG  = $0280
@@ -20,6 +20,7 @@ COVER_BLINK_FRAMES   = 30   ; Half a second on, half a second off, at 60 Hz
 OUTRO_HOLD_FRAMES    = 180  ; Three seconds at 60 Hz
 COVER_STATE   = $00B0         ; 1 fade in, 2 wait, 3 fade out, 4 black, 0 game
 COVER_LEVEL   = COVER_STATE+1 ; 0..63, observable by emulator checks
+COVER_SCENE   = $00B4         ; 0 cover, 1 outro, 2 manual
 
 .macro boot_address portal, address
     lda #<(address)
@@ -51,14 +52,23 @@ COVER_LEVEL   = COVER_STATE+1 ; 0..63, observable by emulator checks
 .endmacro
 
 .segment "CODE"
-_show_outro:
+_show_manual:
     lda #1
-    sta boot_outro
+    sta boot_help
+    lda #2
+    sta boot_scene
+    jmp boot_show
+_show_outro:
+    lda #0
+    sta boot_help
+    lda #1
+    sta boot_scene
     jmp boot_show
 .segment "SPLASH"
 _show_cover:
     lda #0
-    sta boot_outro
+    sta boot_help
+    sta boot_scene
 boot_show:
     lda #$ff
     sta boot_fd+1
@@ -72,14 +82,27 @@ boot_show:
     boot_address RIA_ADDR0, COVER_STATE
     sta RIA_RW0
     sta RIA_RW0
-    boot_open_file cover_path
+    boot_address RIA_ADDR0, COVER_SCENE
+    lda boot_scene
+    sta RIA_RW0
+    asl a
+    tay
+    lda image_paths,y
+    ldx image_paths+1,y
+    jsr boot_open
     boot_read COVER_IMAGE, COVER_HALF_BYTES
     boot_read COVER_IMAGE+COVER_HALF_BYTES, COVER_HALF_BYTES
     jsr boot_close
-    lda boot_outro
-    beq @startup_prompt
+    lda boot_scene
+    jeq @startup_prompt
+    cmp #2
+    beq @manual_prompt
     boot_open_file outro_path
     boot_read OUTRO_PROMPT_IMAGE, OUTRO_PROMPT_BYTES
+    jmp @prompt_loaded
+@manual_prompt:
+    boot_open_file manual_prompt_path
+    boot_read OUTRO_PROMPT_IMAGE, MANUAL_PROMPT_BYTES
     jmp @prompt_loaded
 @startup_prompt:
     boot_open_file prompt_path
@@ -94,7 +117,12 @@ boot_show:
     lda #$ff
     sta RIA_RW0
     sta RIA_RW0
-    boot_open_file fade_path
+    lda boot_scene
+    asl a
+    tay
+    lda fade_paths,y
+    ldx fade_paths+1,y
+    jsr boot_open
     ; Publish the first, black palette before enabling the bitmap plane.
     lda #0
     sta boot_level
@@ -112,9 +140,14 @@ boot_show:
     ldy #0
 @prompt_config:
     lda prompt_config,y
-    ldx boot_outro
+    ldx boot_scene
     beq @write_prompt_config
+    cpx #2
+    beq @manual_config
     lda outro_config,y
+    jmp @write_prompt_config
+@manual_config:
+    lda manual_config,y
 @write_prompt_config:
     sta RIA_RW0
     iny
@@ -141,8 +174,9 @@ boot_show:
     bne @fade_in
     lda #2
     jsr boot_state
-    lda boot_outro
-    beq @startup_wait
+    lda boot_scene
+    cmp #1
+    bne @startup_wait
     lda #OUTRO_HOLD_FRAMES
     sta boot_blink
     lda #1
@@ -155,6 +189,14 @@ boot_show:
     bne @outro_wait
     jmp @dismiss
 @startup_wait:
+    ; F1 opens help but must not dismiss it, even when held through fade in.
+    lda boot_help
+    beq @ready_prompt
+@release_help:
+    jsr boot_vsync
+    jsr boot_any_key
+    bne @release_help
+@ready_prompt:
     lda #COVER_BLINK_FRAMES
     sta boot_blink
     lda #1
@@ -188,8 +230,9 @@ boot_show:
     bpl @fade_out
     lda #4
     jsr boot_state
-    lda boot_outro
-    beq @release_key
+    lda boot_scene
+    cmp #1
+    bne @release_key
     ; Show a completely black frame, then return even if Escape is held.
     jsr boot_vsync
     jsr boot_close
@@ -201,6 +244,12 @@ boot_show:
     jsr boot_any_key
     bne @release_key
     jsr boot_close
+    lda boot_scene
+    bne @restore_game
+    lda #2
+    sta boot_scene
+    jmp boot_show
+@restore_game:
     xreg 1,0,0,1             ; Blank the cover before restoring game assets
     jmi boot_error
     boot_open_file footer_path
@@ -335,6 +384,7 @@ boot_error:
     sta RIA_OP
     jmp RIA_SPIN
 
+.segment "RODATA"
 cover_config:
     .byte 0,0
     .word 0,30,320,180,COVER_IMAGE,COVER_PALETTE
@@ -345,12 +395,14 @@ cover_path:  .asciiz "ROM:cover.bin"
 fade_path:   .asciiz "ROM:cover-fade.bin"
 prompt_path: .asciiz "ROM:cover-prompt.bin"
 footer_path: .asciiz "ROM:demo-footer.bin"
+.segment "DATA"
 boot_fd:     .word $ffff
 boot_level:  .byte 0
 boot_keys:   .byte 0
 boot_blink:  .byte 0
 boot_prompt_visible: .byte 0
-boot_outro: .byte 0
+boot_scene: .byte 0
+boot_help: .byte 0
 
 .assert COVER_IMAGE+2*COVER_HALF_BYTES <= $10000, error, "Cover exceeds XRAM"
 .assert COVER_FADE_FRAMES <= 128, error, "Fade counter range"
@@ -364,3 +416,15 @@ outro_config:
     .byte 0,0
     .word (320-OUTRO_PROMPT_WIDTH)/2,$ff00,OUTRO_PROMPT_WIDTH,8,OUTRO_PROMPT_IMAGE,COVER_PROMPT_PALETTE
 outro_path: .asciiz "ROM:outro-prompt.bin"
+
+manual_config:
+    .byte 0,0
+    .word (320-MANUAL_PROMPT_WIDTH)/2,$ff00,MANUAL_PROMPT_WIDTH,8,OUTRO_PROMPT_IMAGE,COVER_PROMPT_PALETTE
+image_paths: .word cover_path, outro_image_path, manual_image_path
+fade_paths: .word fade_path, outro_fade_path, manual_fade_path
+outro_image_path: .asciiz "ROM:outro.bin"
+outro_fade_path: .asciiz "ROM:outro-fade.bin"
+manual_image_path: .asciiz "ROM:manual.bin"
+manual_fade_path: .asciiz "ROM:manual-fade.bin"
+manual_prompt_path: .asciiz "ROM:manual-prompt.bin"
+.assert OUTRO_PROMPT_IMAGE+MANUAL_PROMPT_BYTES <= COVER_IMAGE, error, "Manual prompt overlaps cover"

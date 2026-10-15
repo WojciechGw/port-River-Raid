@@ -35,7 +35,8 @@ respawning and player switching preserve each player's current section.
 In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
 image remains unchanged. Missile guidance is toggled independently with
-F5 for player 1 and F6 for player 2. F4 has no game function.
+F5 for player 1 and F8 for player 2. F4 toggles color/black and white.
+F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
 they replace some randomly generated enemies, moving and bouncing off the
@@ -182,7 +183,8 @@ the same typeface as the score.
 Field positions follow the supplied layout: GAME on the left, the fuel gauge
 beside it, and BRIDGE above the reserve icons. The fuel gauge frame with E,
 F, and 1/2 is a readable 39×16 bitmap in `src/graphics.h`; the yellow indicator
-depends on the current fuel level.
+depends on the current fuel level. In GAME 1 and GAME 2 the gauge always
+starts at logical X=45, both before starting and during play.
 Five mountain variants replace the house and tree from the 2600 version.
 Two were reconstructed from `original/Atari XL/image0.png`: a tall mountain
 range with blue slopes and lower brown peaks with black ridges. The third is
@@ -247,20 +249,38 @@ before fade out.
 After fade in, the program waits for any HID key, including function keys
 and modifiers; LED status bits do not dismiss the cover. The dismissal key
 is consumed through its release so it cannot also trigger game controls.
+After releasing the cover key, the same helper opens `manual.bin` and
+`manual-fade.bin`, generated from `assets/manual.bmp`. The instructions fade
+in, wait for a separate key press, fade out, and wait for key release before
+initializing the existing mode-selection/demo screen. `manual-prompt.bin`
+contains "PRESS ANY KEY TO START THE GAME", centered at X=64, Y=222 in a
+192x8 bitmap at $0900, with the same blinking timing and white/black palette.
+XRAM $00B4 identifies the current scene: 0 cover, 1 outro, 2 manual.
+F1 also opens this manual during play or the demo. The simulation and audio
+stop until the closing key is released; an existing pause remains active.
+Holding F1 does not dismiss its own screen. Before loading the image, the
+host saves terrain base colors at $F100 and live video data ($0100-$07FF)
+at $F200-$F8FF, above the last manual pixel. On return it rebuilds static
+graphics and terrain from the preserved CPU collision edges, restores
+palettes/descriptors and redraws the HUD without advancing game logic.
+The VSYNC baseline is reset so time spent in help is not counted as dropped
+game frames. Audio is reinitialized using the selected backend.
 The cover helpers and tank extension code/state share free CPU memory from
 $D000 through $FEFF, after the original ROM and before the reserved I/O page,
-without taking space reserved for the stack or game
-buffers. After fade out, the program restores the footer strip from a ROM
-asset, and game initialization restores the remaining assets in the reused XRAM.
+with scene tables in RODATA and small writable state in DATA below the
+reference ROM. After the manual fades out, the program restores the footer
+strip from a ROM asset, and game initialization restores the remaining assets
+in the reused XRAM.
 Escape stops audio before reusing the cover's XRAM and palette for the farewell
-screen. The same fade helper reads `outro-prompt.bin` into $0900 and centers its
+screen, loading `outro.bin` and `outro-fade.bin` from `assets/outro.bmp`.
+The same fade helper reads `outro-prompt.bin` into $0900 and centers its
 112x8 bitmap at X=104, Y=222. "SEE YOU NEXT TIME!" remains visible for 180 VSYNCs
 after fade in, without blinking or responding to keys. Fade out ends on black;
 one final VSYNC displays it before returning to the console, even with Escape held.
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
-After the cover closes, `src/fade.c` and `src/fade.asm` fade in the entire
+After the manual closes, `src/fade.c` and `src/fade.asm` fade in the entire
 game screen over 64 VSYNCs (about one second). All 288 palette entries are
 saved in XRAM $D000 and scaled into staging at $D300. Each RGB555 channel
 uses 32 brightness steps, preserving the transparency bit. Palettes start

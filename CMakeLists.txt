@@ -28,6 +28,11 @@ else()
     set(RIVER_COVER_FADES ${CMAKE_CURRENT_BINARY_DIR}/cover_fade.bin)
     set(RIVER_COVER_PROMPT ${CMAKE_CURRENT_BINARY_DIR}/cover_prompt.bin)
     set(RIVER_OUTRO_PROMPT ${CMAKE_CURRENT_BINARY_DIR}/outro_prompt.bin)
+    set(RIVER_MANUAL_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/manual.bin)
+    set(RIVER_MANUAL_FADES ${CMAKE_CURRENT_BINARY_DIR}/manual_fade.bin)
+    set(RIVER_MANUAL_PROMPT ${CMAKE_CURRENT_BINARY_DIR}/manual_prompt.bin)
+    set(RIVER_OUTRO_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/outro.bin)
+    set(RIVER_OUTRO_FADES ${CMAKE_CURRENT_BINARY_DIR}/outro_fade.bin)
     set(RIVER_COVER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/cover.inc)
     add_custom_command(OUTPUT ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_footer.py
@@ -38,12 +43,16 @@ else()
         VERBATIM)
     add_custom_command(OUTPUT ${RIVER_COVER_IMAGE} ${RIVER_COVER_FADES}
         ${RIVER_COVER_PROMPT} ${RIVER_COVER_INCLUDE} ${RIVER_OUTRO_PROMPT}
+        ${RIVER_MANUAL_IMAGE} ${RIVER_MANUAL_FADES} ${RIVER_MANUAL_PROMPT}
+        ${RIVER_OUTRO_IMAGE} ${RIVER_OUTRO_FADES}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_cover.py
             ${CMAKE_CURRENT_SOURCE_DIR}/assets/cover.bmp
             ${RIVER_COVER_IMAGE} ${RIVER_COVER_FADES} ${RIVER_COVER_PROMPT} ${RIVER_COVER_INCLUDE}
             ${RIVER_FOOTER_IMAGE}
             ${RIVER_OUTRO_PROMPT}
-        DEPENDS assets/cover.bmp tools/make_cover.py ${RIVER_FOOTER_IMAGE}
+            --manual ${CMAKE_CURRENT_SOURCE_DIR}/assets/manual.bmp
+            --outro ${CMAKE_CURRENT_SOURCE_DIR}/assets/outro.bmp
+        DEPENDS assets/cover.bmp assets/manual.bmp assets/outro.bmp tools/make_cover.py ${RIVER_FOOTER_IMAGE}
         VERBATIM)
     add_custom_command(OUTPUT ${RIVER_CORE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/port_original.py
@@ -71,6 +80,11 @@ else()
     rp6502_asset(riverraid cover-fade.bin ${RIVER_COVER_FADES})
     rp6502_asset(riverraid cover-prompt.bin ${RIVER_COVER_PROMPT})
     rp6502_asset(riverraid outro-prompt.bin ${RIVER_OUTRO_PROMPT})
+    rp6502_asset(riverraid manual.bin ${RIVER_MANUAL_IMAGE})
+    rp6502_asset(riverraid manual-fade.bin ${RIVER_MANUAL_FADES})
+    rp6502_asset(riverraid manual-prompt.bin ${RIVER_MANUAL_PROMPT})
+    rp6502_asset(riverraid outro.bin ${RIVER_OUTRO_IMAGE})
+    rp6502_asset(riverraid outro-fade.bin ${RIVER_OUTRO_FADES})
     rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
     # Cover helpers and tank extensions share CPU RAM above the reference ROM.
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)

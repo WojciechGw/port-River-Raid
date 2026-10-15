@@ -108,11 +108,12 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | Arrow keys | Player 1: movement; Up accelerates, Down slows down |
 | WASD, left Ctrl | Player 2: movement and firing; also control player 1 in single-player games |
 | Space or Enter | Fire; start a game or restart after game over |
-| F1 | Color / black and white |
+| F1 | Instructions (any key returns to the game) |
 | F2 | SELECT: GAME 1 solo, GAME 2 alternating, GAME 3 DUO |
 | F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
+| F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
-| F6 | Player 2: guided or straight missiles |
+| F8 | Player 2: guided or straight missiles |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |
@@ -128,13 +129,16 @@ In attract mode, the footer scrolls a light gray caption containing the game
 title, author, copyright dates, Activision logo, and instructions for starting.
 At startup, the program first displays `assets/cover.bmp` with a smooth fade in
 (about one second). Any key starts the fade out; once it finishes and the key
-is released, the game screen appears. The cover retains its 320×180 aspect
-ratio and is centered on a black background.
+is released, `assets/manual.bmp` fades in. The instructions wait for another
+key with the blinking message "PRESS ANY KEY TO START THE GAME", then fade out
+and open the existing mode-selection/demo screen. Each dismissal key must be
+released before continuing. Both images retain their 320×180 aspect ratio
+and are centered on a black background.
 A small white "PRESS ANY KEY" message blinks below the image, visible for half
 a second and hidden for half a second. The cover and its palettes are named
 assets in the `.rp6502` file, loaded from `ROM:cover.bin` and `ROM:cover-fade.bin`;
 the message bitmap is loaded from `ROM:cover-prompt.bin`.
-Escape displays the same image with a fade in and the white message
+Escape displays `assets/outro.bmp` with a fade in and the white message
 "SEE YOU NEXT TIME!". After three seconds at full brightness, the image fades
 out completely before the program exits. Held keys do not interrupt this screen.
 The entire game screen fades in from black over about one second, including
@@ -166,12 +170,12 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.
 - `src/riverraid.asm`: fast scanline transfers and sprite/terrain collisions.
-- `src/cover.asm`: cover display, fades, and waiting for a key.
+- `src/cover.asm`: cover, instructions and outro display, fades, and key handling.
 - `src/riverraid.cfg`: RAM layout with the original game's zero page reserved.
 - `src/xram.h`: XRAM layout and PIX structures checked at compile time.
 - `tools/port_original.py`: automatic DASM-to-ca65 translation and selection
   of the original routines. Generates `original_core.asm` in the build directory.
-- `tools/make_cover.py`: converts `assets/cover.bmp` and prepares fade palettes.
+- `tools/make_cover.py`: converts cover/manual/outro BMPs and prepares fade palettes.
 - `tools/preview_audio.py`: offline PCM/PSG listening previews from captured parameters.
 - `tools/preview_synth.py`: PSG/OPL register-trace WAV previews and spectral/Haar measurements.
 - `tools/compare_synth.py`: preview signal checks and an optional RMS-matched XL/XE comparison.

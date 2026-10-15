@@ -38,7 +38,7 @@ _Static_assert(XRAM_DEMO_FOOTER_IMAGE + DEMO_FOOTER_BYTES <= XRAM_MEDIUM_MOUNTAI
 #define HUD_GAME_PITCH 8
 #define HUD_GAME_NUMBER_X 29
 #define HUD_GAME_NUMBER_Y 26
-#define HUD_FUEL_X 44
+#define HUD_FUEL_X 45
 #define HUD_FUEL_Y 17
 #define HUD_FUEL_WIDTH 39
 #define HUD_FUEL_HEIGHT (sizeof(fuel_gauge)/sizeof(fuel_gauge[0]))
@@ -58,6 +58,7 @@ void demo_tick(void);
 void present_frame(void);
 void show_cover(void);
 void show_outro(void);
+void show_manual(void);
 void game_fade_prepare(void);
 void game_fade_in(void);
 void __fastcall__ write_terrain_row(unsigned address);
@@ -150,7 +151,6 @@ static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_T
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
 static uint8_t state_bytes[32], old_score[12], old_fuel, palette_player;
-static uint8_t shown_fuel_x;
 static uint16_t ticks, skipped_frames, jet_cache=0xffff;
 /* 1: startup fade, 2: scrolling attract demo, 0: user game. */
 uint8_t ready=1;
@@ -1270,7 +1270,7 @@ static void update_high_score(void)
 }
 static void draw_hud(void)
 {
-    static uint8_t y,i,bits,fy,x;
+    static uint8_t y,i,bits,fy;
     fy=G(0xb7)>>3;
     hud_ink=0x88;
     if (hud_dirty&1) {
@@ -1284,15 +1284,12 @@ static void draw_hud(void)
         }
     }
     if (hud_dirty&2) {
-        x=HUD_FUEL_X+(ready!=0); shown_fuel_x=x;
-        hud_column=HUD_FUEL_X; hud_length=HUD_FUEL_WIDTH+1;
+        hud_column=HUD_FUEL_X; hud_length=HUD_FUEL_WIDTH;
         for (y=0;y<HUD_FUEL_HEIGHT;++y) {
-            /* Clear the exposed edge when moving between preview and play. */
-            row[HUD_FUEL_X]=row[HUD_FUEL_X+HUD_FUEL_WIDTH]=0xaa;
-            memcpy(row+x,fuel_rows[y],HUD_FUEL_WIDTH);
+            memcpy(row+HUD_FUEL_X,fuel_rows[y],HUD_FUEL_WIDTH);
             /* Keep the gauge lettering in front of the moving needle. */
             if (y>=5 && y<15) for (i=0;i<2;++i)
-                if (fuel_rows[y][4+fy+i]==0xaa) row[x+4+fy+i]=0xbb;
+                if (fuel_rows[y][4+fy+i]==0xaa) row[HUD_FUEL_X+4+fy+i]=0xbb;
             write_hud_span(XRAM_HUD+(uint16_t)(HUD_FUEL_Y+y)*RIVER_WIDTH+HUD_FUEL_X);
         }
     }
@@ -1409,7 +1406,7 @@ static void render(void)
         duo_hud(); return;
     }
     if (memcmp(old_score,(void*)0xcd,12)) {hud_dirty|=1; update_high_score();}
-    if (old_fuel!=(G(0xb7)>>3) || shown_fuel_x!=HUD_FUEL_X+(ready!=0)) hud_dirty|=2;
+    if (old_fuel!=(G(0xb7)>>3)) hud_dirty|=2;
     if (hud_dirty) draw_hud();
     hud_details();
 }
@@ -1533,7 +1530,37 @@ static void duo_hud(void)
     hud_sprites[16].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)%10)*32;
     upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites)); hud_dirty=0;
 }
-static uint8_t configure_video(void)
+/* The manual ends at $F0FF. Preserve each terrain row's base color and
+ * live descriptors/palettes above it; collision edges remain in CPU RAM. */
+static void help_save(void)
+{
+    uint8_t y;
+    uint16_t a;
+    for (y=0;y<RIVER_RING;++y)
+        xram0_poke8(XRAM_HELP_TERRAIN_COLORS+y,xram0_peek8(XRAM_TERRAIN+(uint16_t)y*TERRAIN_COLUMNS));
+    for (a=0;a<HELP_VIDEO_BYTES;a+=sizeof(row)) {
+        uint16_t count=HELP_VIDEO_BYTES-a<sizeof(row) ? HELP_VIDEO_BYTES-a : sizeof(row);
+        xram0_read(row,XRAM_PALETTE+a,count); upload(XRAM_HELP_VIDEO+a,row,count);
+    }
+}
+static void help_restore_terrain(void)
+{
+    uint8_t n;
+    for (n=0;n<RIVER_RING;++n) {
+        shore_color=xram0_peek8(XRAM_HELP_TERRAIN_COLORS+n);
+        if (shore_color==TERRAIN_ROAD_UPPER) shore_color=7;
+        shore_base=8+(shore_color-2)*18;
+        shore_left=river_left[n]; shore_right=river_right[n];
+        shore_outer=shore_left-player_outer_left[n];
+        shore_inner=player_island_left[n]-shore_right;
+        shore_half(); memcpy(row,bank_half,20);
+        shore_outer=shore_left-(160-player_outer_right[n]);
+        shore_inner=160-player_island_right[n]-shore_right;
+        shore_half();
+        write_terrain_row(XRAM_TERRAIN+(uint16_t)n*TERRAIN_COLUMNS);
+    }
+}
+static uint8_t configure_video(uint8_t restoring)
 {
     static uint8_t y,i,x,bits;
     static sprite_t life_sprite;
@@ -1594,7 +1621,9 @@ static uint8_t configure_video(void)
     upload(XRAM_HUD_BITMAP_CONFIG,&hud_bitmap,sizeof(hud_bitmap));
     upload(XRAM_DEMO_FOOTER_CONFIG,&demo_footer,sizeof(demo_footer));
     xram0_set(XRAM_HUD+HUD_PANEL_HEIGHT*RIVER_WIDTH,0x77,(HUD_HEIGHT-HUD_PANEL_HEIGHT)*RIVER_WIDTH);
+    hud_pending=0;
     hud_clear(); hud_layout();
+    shown_duo_lives[0]=shown_duo_lives[1]=0;
     life_sprite.y=-256; life_sprite.image=XRAM_RESERVE_IMAGE;
     life_sprite.size=0x11; life_sprite.options=0x42;
     for (i=0;i<DUO_LIFE_SPRITE_COUNT;++i) {
@@ -1605,10 +1634,26 @@ static uint8_t configure_video(void)
     /* Prepare the entire first frame before enabling its planes. XRAM still
      * contains cover pixels, so even a partially initialized scene can flash. */
     upload(XRAM_TERRAIN_CONFIG,&terrain,sizeof(terrain));
-    rebuild_terrain();
-    if (!audio_init()) return 0;
-    render(); present_frame();
-    game_fade_prepare();
+    if (restoring) {
+        uint16_t a;
+        help_restore_terrain();
+        jet_cache=0xffff; jet_image();
+        if (VAR==2) {duo_hud(); duo_hud();}
+        else {draw_hud(); hud_details();}
+        duo_lives_hud();
+        for (a=0;a<HELP_VIDEO_BYTES;a+=sizeof(row)) {
+            uint16_t count=HELP_VIDEO_BYTES-a<sizeof(row) ? HELP_VIDEO_BYTES-a : sizeof(row);
+            xram0_read(row,XRAM_HELP_VIDEO+a,count); upload(XRAM_PALETTE+a,row,count);
+        }
+        /* F1 may interrupt a HUD layout spread over several frames. */
+        upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites));
+    } else {
+        rebuild_terrain();
+        if (!audio_init()) return 0;
+        render(); present_frame();
+        game_fade_prepare();
+    }
+    if (restoring && !audio_init()) return 0;
     if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),21,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
@@ -1618,7 +1663,7 @@ static uint8_t configure_video(void)
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_DEMO_FOOTER_CONFIG,1,HUD_FOOTER_Y,HUD_FOOTER_Y+8)<0 ||
         xreg(0,0,0,XRAM_KEYBOARD)<0 || xreg(0,0,2,XRAM_GAMEPADS)<0) return 0;
-    game_fade_in();
+    if (!restoring) game_fade_in();
     return 1;
 }
 /* Keep startup and the frame loop compact in the fixed Debug RAM map. */
@@ -1635,7 +1680,7 @@ int main(int argc,char** argv)
     G(0x280)=255; G(0x22c)=G(0x22d)=128;
     while (MODE!=255) rr_step();
     xram0_set(XRAM_PSG,0,64);
-    if (!configure_video()) return 1;
+    if (!configure_video(0)) return 1;
     last_vsync=RIA.vsync;
     for (;;) {
         do {now=RIA.vsync;} while (now==last_vsync);
@@ -1648,9 +1693,24 @@ int main(int argc,char** argv)
         /* SELECT first rebuilds the demo world; lay out its HUD afterwards. */
         if (hud_pending && MODE!=255) hud_layout();
         input=read_input(); if (input&QUIT) break;
-        controls=(pressed(0x3a) ? 1 : 0)|(pressed(0x3b) ? 2 : 0)|
+        if (pressed(0x3a)) {
+            uint8_t saved_paused=paused;
+            uint16_t saved_footer=footer_offset;
+            audio_stop();
+            xreg(1,0,0,1);
+            help_save();
+            show_manual();
+            paused=1;
+            if (!configure_video(1)) return 1;
+            paused=saved_paused; footer_offset=saved_footer;
+            upload(XRAM_STATE,state_bytes,32);
+            previous_keys=previous_input=0;
+            last_vsync=RIA.vsync;
+            continue;
+        }
+        controls=(pressed(0x3d) ? 1 : 0)|(pressed(0x3b) ? 2 : 0)|
                  (pressed(0x3c) ? 4 : 0)|(pressed(0x3e) ? 8 : 0)|
-                 (pressed(0x3f) ? 16 : 0);
+                 (pressed(0x41) ? 16 : 0);
         if ((controls&1) && !(previous_keys&1)) switches^=8;
         if ((controls&4) && !(previous_keys&4)) {
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
