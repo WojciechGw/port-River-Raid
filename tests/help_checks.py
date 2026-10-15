@@ -11,7 +11,7 @@ def run_help_checks(case, sym, boot, output):
     pause = ["press p", "run 3", "release p", "run 3"]
     snapshot = ["dump 0x80 128", "dump xram:0x0200 16",
                 "dump xram:0x0800 7680", "dump xram:0xa000 5920",
-                "dump xram:0x0300 240", "dump xram:0x0400 512",
+                "dump xram:0x0300 250", "dump xram:0x0400 512",
                 f'dump 0x{sym["duo_players"]:04x} 46']
     for variant in range(3):
         select = boot + [cmd for _ in range(variant) for cmd in

@@ -117,7 +117,8 @@ typedef struct {
     uint8_t active,direction;
 } helicopter_shot_t;
 #pragma data-name(push, "SPLASH")
-static bank_tank_t bank_tanks[2]={{0}};
+/* Slot 2 shares a stopped road tank body, with an independent shot. */
+static bank_tank_t bank_tanks[3]={{0}};
 static uint8_t bank_shot_random=0xa7;
 static helicopter_shot_t helicopter_shots[6]={{0}};
 /* 0 = unassigned block, 1 = normal helicopter, 2 = firing helicopter. */
@@ -148,6 +149,7 @@ static uint8_t shore_left, shore_right, shore_outer, shore_inner, shore_base, sh
 static uint8_t keys[32], pads[40], inputs[2], previous_input, previous_keys;
 static uint8_t paused, switches=0x0b, palette_mask, palette_xor;
 uint8_t tank_track_phase;
+uint8_t road_gunner=255;
 static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
@@ -728,6 +730,7 @@ static uint8_t tank_on_bridge(uint8_t n)
 static void destroy_tank(uint8_t n)
 {
     tanks[n].status=2; tanks[n].explosion=12; tank_bonus=1;
+    if (road_gunner==n) bank_tanks[2].shot_phase=0;
 }
 
 static void bank_round_hits_fuel(bank_tank_t *t);
@@ -790,7 +793,7 @@ static void helicopter_shots_render(void)
 }
 static void clear_enemy_shots(void)
 {
-    bank_tanks[0].shot_phase=bank_tanks[1].shot_phase=0;
+    bank_tanks[0].shot_phase=bank_tanks[1].shot_phase=bank_tanks[2].shot_phase=0;
     memset(helicopter_shots,0,sizeof(helicopter_shots));
 }
 /* Interpolate the drop over the selected range, stopping at track height.
@@ -838,7 +841,21 @@ static void bank_tanks_tick(uint8_t scroll)
     uint8_t n,y,r,edge;
     int16_t target,sy;
     bank_tank_t *t;
-    for (n=0;n<2;++n) {
+    t=bank_tanks+2;
+    /* The body remains owned by its native road block. Match the previous
+     * screen row so a block shift preserves the round and firing cooldown. */
+    if (road_gunner==255) {
+        if (t->status) memset(t,0,sizeof(*t));
+    } else {
+        sy=128+OFFSET-(int16_t)road_gunner*32-scroll;
+        if (!t->status || t->y!=sy) {
+            memset(t,0,sizeof(*t));
+            t->x=tanks[road_gunner].x; t->y=sy;
+            t->side=tanks[road_gunner].direction;
+            t->ground_target=t->x; t->status=1;
+        }
+    }
+    for (n=0;n<3;++n) {
         t=bank_tanks+n;
         if (!t->status) continue;
         t->y+=scroll;
@@ -945,10 +962,11 @@ static void bank_tanks_collisions(void)
     int16_t dy,dx,by=153-(int16_t)MY;
     bank_tank_t *t;
     if (ready || MODE) return;
-    for (n=0;n<2;++n) {
+    if (!(bank_tanks[0].status|bank_tanks[1].status|bank_tanks[2].status)) return;
+    for (n=0;n<3;++n) {
         t=bank_tanks+n;
         if (t->status!=1) continue;
-        if (!tank_bonus && MY<=161 && MX>=t->x && MX<t->x+TANK_WIDTH) {
+        if (n<2 && !tank_bonus && MY<=161 && MX>=t->x && MX<t->x+TANK_WIDTH) {
             for (y=0;y<8;++y) {
                 dy=by+y-t->y;
                 if (dy>=0 && dy<32 && opaque(TANK_ID,MX-t->x,dy,t->side,0)) {
@@ -980,9 +998,11 @@ static void bank_tanks_render(void)
     uint8_t n,stage;
     bank_tank_t *t;
     sprite_t *s;
-    for (n=0;n<2;++n) {
+    if (!(bank_tanks[0].status|bank_tanks[1].status|bank_tanks[2].status)) return;
+    for (n=0;n<3;++n) {
         t=bank_tanks+n;
         if (!t->status) continue;
+        if (n==2) {s=sprites+ROAD_SHOT_SPRITE-1; goto shot;}
         s=sprites+16+n*2;
         s->x=t->x*2; s->y=RIVER_TOP+t->y;
         s->image=tank_image(); s->palette=XRAM_TANK_PALETTE;
@@ -993,7 +1013,10 @@ static void bank_tanks_render(void)
         if (t->status==2) {
             if (!t->timer) {s->y=-256; continue;}
             s->x=t->x*2; s->image=XRAM_TANK_BLAST; s->palette=XRAM_PALETTE; s->size=0x11;
-        } else if (t->shot_phase) {
+            continue;
+        }
+shot:
+        if (t->shot_phase) {
             stage=t->shot_phase==2 ? tank_explosion_stage(t->timer) : 0;
             if (stage==255) continue;
             ++s; s->x=t->shot_x*2;
@@ -1344,7 +1367,7 @@ static void render(void)
     helicopter_shots_render();
     /* Keep the legacy descriptor at zero for diagnostics. PIX has one
      * sprite list per plane: both front-plane jets must be contiguous. */
-    sprites[22]=sprites[0];
+    sprites[PLAYER_SPRITE]=sprites[0];
     if (VAR==2) duo_render();
     terrain.y_pos_px=RIVER_TOP-ring_top;
     /* World position and sprites stay in RAM until the next VSYNC. Publish
@@ -1629,8 +1652,8 @@ static uint8_t configure_video(uint8_t restoring)
     if (restoring && !audio_init()) return 0;
     if (xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
-        xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),21,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
-        xreg(1,0,1,5,0x38,XRAM_SPRITES+22*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),PLAYER_SPRITE-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_SPRITES+PLAYER_SPRITE*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_DUO_LIFE_SPRITES,DUO_LIFE_SPRITE_COUNT,2,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||

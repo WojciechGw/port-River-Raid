@@ -5,6 +5,10 @@ Po zbudowaniu Release: `python tests/emulator_checks.py`.
 czołgów na dojazdach po zniszczeniu mostu, zatrzymanie przed przerwą,
 punktację, bezpośrednie trafienia oraz przewijanie i restart etapu.
 Testy `duo-bridge-spares-tank-*` sprawdzają tę regułę dla obu graczy DUO.
+Zestaw obejmuje także strzelanie ocalałego czołgu w stronę rzeki, równoczesne
+działanie trzech czołgów, pauzę, przewijanie, restart i zachowanie pocisku po F1.
+Testy `duo-road-gunner-phase*` sprawdzają bezpieczny przelot pocisku oraz
+śmiertelny rozbryzg dla każdego z graczy.
 Opcje `--build` i `--emulator` wskazują inny katalog lub emulator.
 Potrzebne są `riverraid.rp6502` i odpowiadający plik `riverraid.dbg`.
 Nie są wymagane dodatkowe pakiety Pythona.

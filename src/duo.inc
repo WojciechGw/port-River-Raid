@@ -163,7 +163,7 @@ static void duo_render(void)
     static uint8_t n;
     static sprite_t *s,*shot;
     for (n=0;n<2;++n) {
-        duo_p=duo_players+n; s=sprites+22+n; shot=sprites+20+n;
+        duo_p=duo_players+n; s=sprites+PLAYER_SPRITE+n; shot=sprites+20+n;
         s->y=shot->y=-256;
         if (ready || !duo_started) continue;
         if (duo_p->state==1 || duo_p->timer) {
@@ -178,6 +178,6 @@ static void duo_render(void)
             s->image=BULLET_IMAGE; s->palette=XRAM_PALETTE; s->size=0x10; s->options=0x42;
         }
     }
-    sprites[0]=sprites[22]; sprites[1].y=-256;
+    sprites[0]=sprites[PLAYER_SPRITE]; sprites[1].y=-256;
 }
 #pragma optimize(pop)

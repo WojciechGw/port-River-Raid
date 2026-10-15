@@ -52,6 +52,11 @@ objects and awards 750 points in total instead of 500.
 A tank still on either approach survives bridge destruction, remains visible
 and shootable, and stops with its body before the broken deck (X=47 from the
 left or X=104 from the right). Destroying the bridge alone awards 500 points.
+Once stopped, it fires toward the river using the bank tank's firing cadence,
+range selection, shell descent and splash collisions, even before bridge seven.
+Its independent projectile can coexist with both bank tanks' projectiles.
+Destroying the survivor clears its shot; scrolling and F1 preserve it, while
+pause freezes it and restart clears it.
 The companion persists through the bridge's explosion and empty-object states
 until its terrain block scrolls away or the section restarts. Road tank
 synchronization and motion use compact 6502 helpers to keep DUO within a frame.
@@ -111,7 +116,7 @@ until they leave the screen. In attract mode they do not approach or fire,
 and no new bank tanks spawn.
 Helicopter shots reuse the companion sprite slots of blocks without bridge
 tanks, preserving the existing
-200-byte VSYNC sprite upload.
+250-byte VSYNC sprite upload (including the road survivor's shot and DUO jets).
 The port adds these encounters between bridges using the native scenery
 seed without changing the original random-number sequence. Their exact
 spawn cadence and explosion artwork are approximations of the 5200 version.

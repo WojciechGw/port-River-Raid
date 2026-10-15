@@ -49,7 +49,7 @@ def run_duo_checks(case, sym, boot, output):
     fixture += ['run 2']
 
     _, buffers = case('duo-start-two-visible',start+dump+[
-        'dump xram:0x03dc 20',f'shot "{(output / "duo.png").as_posix()}"'])
+        'dump xram:0x03e6 20',f'shot "{(output / "duo.png").as_posix()}"'])
     assert buffers[0][19]==buffers[0][42]==1
     jets=buffers[1]
     assert struct.unpack_from('<h',jets,2)[0]==struct.unpack_from('<h',jets,12)[0]==21+buffers[0][22]
@@ -106,7 +106,7 @@ def run_duo_checks(case, sym, boot, output):
 
     advancing=fixture+[player(0,1,68),player(1,1,84),player(0,3,254),'release down','press up']+resume+['run 80']
     _,buffers=case('duo-four-heights-limit',advancing+dump+[
-        'dump xram:0x03dc 20',f'shot "{(output / "duo-overtake.png").as_posix()}"'])
+        'dump xram:0x03e6 20',f'shot "{(output / "duo-overtake.png").as_posix()}"'])
     p1,p2=buffers[0][:23],buffers[0][23:]
     assert p1[19]==p2[19]==1 and p2[22]-p1[22]==72
     assert struct.unpack_from('<h',buffers[1],2)[0]==p1[22]+21
@@ -356,6 +356,23 @@ def run_duo_checks(case, sym, boot, output):
             resume+dump)
         p=states(buffers)
         assert p[n][19]==2 and p[n^1][19]==1
+
+        for phase in (1,2):
+            # Same trajectory as a bank tank: flight is safe, splash is not.
+            shot=struct.pack('<hhh7B',47,96,60+n*30,0,1,90,phase,110,6,47)
+            _,buffers=case(f'duo-road-gunner-phase{phase}-p{n+1}',fixture+[
+                poke(0xa1,0),poke(sym['tanks']+5,struct.pack('<hBBB',47,1,0,0)),
+                poke(sym['road_gunner'],1),poke(sym['bank_tanks']+26,shot)
+            ]+resume+dump)
+            p=states(buffers)
+            assert p[n][19]==(2 if phase==2 else 1) and p[n^1][19]==1
+
+    case('duo-three-gunners-performance',fixture+[
+        poke(0xa3,0),poke(sym['tanks']+15,struct.pack('<hBBB',47,1,0,0)),
+        poke(sym['river_left'],[64]*192),poke(sym['river_right'],[80]*192),
+        poke(sym['bank_tanks'],struct.pack('<hhh7B',53,0,0,0,1,0,0,0,0,53)+
+             struct.pack('<hhh7B',98,64,0,1,1,0,0,0,0,98))
+    ]+resume+['run 180','peek xram:0x00d3 1','peek xram:0x00ea 1'])
 
     _,buffers=case('duo-personal-bonus-life',fixture+[
         poke(0xbd,7),poke(sym['bank_tanks'],bank),

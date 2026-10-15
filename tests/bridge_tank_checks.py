@@ -66,3 +66,73 @@ def run_bridge_tank_checks(case, sym, fixture, resume):
         "press r","run 4","release r","run 4",f'dump 0x{sym["tanks"]:04x} 30'])
     assert data[0][2]==1 and struct.unpack_from("<h",data[0])[0]==47
     assert not any(data[1][2::5]), "Restart retained a survivor"
+
+    gunner = sym["bank_tanks"]+26
+    gun_dump = [f"dump 0x{gunner:04x} 13", "dump xram:0x03dc 10"]
+    shooting = base + [poke(0xa2,0),poke(sym["bank_tanks"],[0]*39),
+        poke(sym["river_left"],[64]*192),poke(sym["river_right"],[80]*192)]
+    for direction,x in ((0,47),(1,104)):
+        _,data=case(f"bridge-survivor-fires-inward-{direction}",shooting+[
+            poke(tank,struct.pack("<hBBB",x,1,direction,0))]+resume+[
+            f"wait 0x{gunner+9:04x} 1 120", "run 1"]+gun_dump+[
+            f"wait 0x{gunner+9:04x} 2 30", "run 1"]+gun_dump)
+        firing,sprite,splash,impact=data
+        assert firing[6]==direction and firing[7]==1 and firing[9]==1
+        shot_x=struct.unpack_from("<h",firing,4)[0]
+        assert (shot_x<x if direction else shot_x>x), "Shot flies away from the river"
+        assert 64<=firing[10]<=88, "Splash target is outside water"
+        assert struct.unpack_from("<h",sprite,2)[0]>0 and sprite[8]==0x01
+        assert splash[9]==2 and struct.unpack_from("<h",splash,4)[0]==splash[10]
+        assert impact[8]==0x31 and struct.unpack_from("<h",impact,2)[0]>0
+
+    for bridge,x in ((8,47),(0,40)):
+        _,data=case(f"road-tank-waits-until-parked-{bridge}",shooting+[
+            poke(0xa2,bridge),poke(tank,struct.pack("<hBBB",x,1,0,0))]+resume+[
+            f"dump 0x{gunner:04x} 13"])
+        assert not any(data[0]), "Tank fired before stopping at a broken bridge"
+
+    # Two bank tanks and the road survivor must retain separate projectiles.
+    others=struct.pack("<hhh7B",30,40,40,0,1,90,1,80,0,30)
+    others+=struct.pack("<hhh7B",122,90,110,1,1,90,1,80,0,122)
+    _,data=case("bridge-survivor-three-gunners-and-pause",shooting+[
+        poke(tank,struct.pack("<hBBB",47,1,0,0)),poke(sym["bank_tanks"],others)
+    ]+resume+[f"dump 0x{sym['bank_tanks']:04x} 39", "dump xram:0x03a0 70",
+        "press p","run 3","release p","run 3",f"dump 0x{gunner:04x} 13",
+        "run 30",f"dump 0x{gunner:04x} 13"])
+    assert all(data[0][n*13+9] for n in range(3))
+    assert all(struct.unpack_from("<h",data[1],n*10+2)[0]>0 for n in (1,3,6))
+    assert data[2]==data[3], "Paused road tank advanced its shot"
+
+    _,data=case("bridge-survivor-destroyed-clears-shot",shooting+[
+        poke(tank,struct.pack("<hBBB",47,1,0,0))]+resume+[
+        "press p","run 3","release p","run 3",poke(0xb2,75),poke(0xf5,50)
+    ]+resume+[f"dump 0x{gunner:04x} 13",f"dump 0x{tank:04x} 5",
+        "dump xram:0x03dc 10"])
+    assert data[1][2]==2 and not any(data[0])
+    assert struct.unpack_from("<h",data[2],2)[0]==-256
+
+    # A block rollover must not replace a flying round with a fresh one.
+    _,data=case("bridge-gunner-scroll-and-restart",shooting+[
+        poke(tank,struct.pack("<hBBB",47,1,0,0)),poke(sym['road_gunner'],2),
+        poke(0x8b,31),poke(0xb5,254),poke(0xb6,2),
+        poke(gunner,struct.pack('<hhh7B',47,95,56,0,1,90,1,88,0,47))
+    ]+resume+[f"dump 0x{gunner:04x} 13", f"dump 0x{sym['road_gunner']:04x} 1",
+        "press r","run 4","release r","run 4",f"dump 0x{gunner:04x} 13"])
+    assert data[1][0]==1 and struct.unpack_from('<h',data[0],2)[0]>95
+    assert 0<data[0][8]<90 and struct.unpack_from('<h',data[0],4)[0]>56
+    assert not any(data[2]), "Restart retained the survivor's round"
+
+    snapshot=[f"dump 0x{gunner:04x} 13", "dump xram:0x03dc 10"]
+    _,data=case("bridge-gunner-f1-restores-shot",shooting+[
+        poke(tank,struct.pack("<hBBB",47,1,0,0))]+resume+[
+        "press p","run 3","release p","run 3"]+snapshot+[
+        "release down","press f1","wait xram:0x0080 0 10","wait xram:0x00b0 2 120",
+        "release f1","wait xram:0x02a4 222 5","press space","run 3",
+        "release space","wait xram:0x0080 82 240","run 3"]+snapshot)
+    assert data[:2]==data[2:], "F1 changed the survivor's shot"
+
+    for x,direction,facing in ((47,1,0),(104,0,1)):
+        _,data=case(f"bridge-survivor-turns-toward-river-{x}",shooting+[
+            poke(tank,struct.pack('<hBBB',x,1,direction,0))]+resume+[
+            f"dump 0x{tank:04x} 5", f"dump 0x{gunner:04x} 13"])
+        assert data[0][3]==data[1][6]==facing and data[1][9]

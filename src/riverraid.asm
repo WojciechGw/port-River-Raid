@@ -23,10 +23,12 @@
 .export _present_frame
 .import _terrain, _sprites, _footer_offset
 .export _sync_tanks, _move_tanks
-.import _tanks, _tank_track_phase
+.import _tanks, _tank_track_phase, _road_gunner
 .segment "SPLASH"
 ; Road tank motion, including stopping its whole body before a broken deck.
 _move_tanks:
+    lda #255
+    sta _road_gunner
     lda $82
     and #3
     bne @sync
@@ -39,7 +41,9 @@ _move_tanks:
 @sync:
     jsr _sync_tanks
     lda $c6
-    bne @done
+    beq :+
+    rts
+:
     ldx #25
     ldy #5
 @tank:
@@ -49,10 +53,25 @@ _move_tanks:
 @live:
     lda _tanks+2,x
     cmp #1
-    bne @next
-    lda $82
-    and #1
-    bne @next
+    beq :+
+    jmp @next
+:
+    ; After the bridge falls, face the river from either bank, including
+    ; tanks that had already crossed or were heading toward the screen edge.
+    lda $a0,y
+    cmp #8
+    beq @direction
+    lda _tanks+1,x
+    bmi @face_right
+    lda _tanks,x
+    cmp #80
+    lda #1
+    bcs @face
+@face_right:
+    lda #0
+@face:
+    sta _tanks+3,x
+@direction:
     lda _tanks+3,x
     bne @left
     lda $a0,y
@@ -62,8 +81,11 @@ _move_tanks:
     bmi @right_move
     lda _tanks,x
     cmp #47                 ; 56 - tank width 9
-    bcs @next
+    bcs @parked
 @right_move:
+    lda $82
+    and #1
+    bne @next
     inc _tanks,x
     bne @right_edge
     inc _tanks+1,x
@@ -82,8 +104,11 @@ _move_tanks:
     beq @left_move
     lda _tanks,x
     cmp #105                ; stop at the deck's right edge, X=104
-    bcc @next
+    bcc @parked
 @left_move:
+    lda $82
+    and #1
+    bne @next
     lda _tanks,x
     bne @left_low
     dec _tanks+1,x
@@ -96,13 +121,17 @@ _move_tanks:
     bcs @next
     lda #0
     sta _tanks+3,x
+    beq @next
+@parked:
+    sty _road_gunner
 @next:
     txa
     sec
     sbc #5
     tax
     dey
-    bpl @tank
+    bmi @done
+    jmp @tank
 @done:
     rts
 
@@ -172,7 +201,7 @@ _sync_tanks:
 
 ; Present the prepared world immediately after VSYNC, before the VGA reaches
 ; RIVER_TOP. Only Y changes in the tile config; dimensions/data stay fixed.
-; 240 sprite bytes + Y take approximately 0.4 ms at 8 MHz. Never publish
+; 250 sprite bytes + Y take approximately 0.4 ms at 8 MHz. Never publish
 ; the scroll origin halfway through expensive terrain/collision processing.
 _present_frame:
     lda #1
@@ -198,6 +227,12 @@ _present_frame:
     .endrepeat
     cpy #240
     bne @sprite
+@tail:
+    lda _sprites,y
+    sta RIA_RW0
+    iny
+    cpy #250
+    bne @tail
     lda #$62
     sta RIA_ADDR0
     lda #$02
