@@ -1,6 +1,10 @@
 # Testy portu
 
 Po zbudowaniu Release: `python tests/emulator_checks.py`.
+`python tests/emulator_checks.py --bridge-tanks-only` sprawdza przetrwanie
+czołgów na dojazdach po zniszczeniu mostu, zatrzymanie przed przerwą,
+punktację, bezpośrednie trafienia oraz przewijanie i restart etapu.
+Testy `duo-bridge-spares-tank-*` sprawdzają tę regułę dla obu graczy DUO.
 Opcje `--build` i `--emulator` wskazują inny katalog lub emulator.
 Potrzebne są `riverraid.rp6502` i odpowiadający plik `riverraid.dbg`.
 Nie są wymagane dodatkowe pakiety Pythona.

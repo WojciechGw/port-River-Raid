@@ -340,6 +340,17 @@ def run_duo_checks(case, sym, boot, output):
         p=states(buffers)
         assert points(p[n])==750 and points(p[n^1])==0
 
+        for direction,x,stop in ((0,40,47),(1,112,104)):
+            _,buffers=case(f'duo-bridge-spares-tank-p{n+1}-{direction}',
+                fixture+object_at(2,8,63)+[
+                    poke(sym['tanks']+10,list(struct.pack('<hBBB',x,1,direction,0))),
+                    player(n,0,77),player(n,12,79)]+resume+['run 50',
+                    f'dump 0x{sym["tanks"]+10:04x} 5','dump xram:0x0378 10']+dump)
+            p=states(buffers)
+            assert points(p[n])==500 and points(p[n^1])==0
+            assert buffers[0][2]==1 and struct.unpack_from('<h',buffers[0])[0]==stop
+            assert struct.unpack_from('<h',buffers[1],2)[0]!=-256
+
         _,buffers=case(f'duo-enemy-projectile-p{n+1}',fixture+[
             poke(sym['helicopter_shots'],list(struct.pack('<hh2B',60+n*30,109,1,1)))]+
             resume+dump)

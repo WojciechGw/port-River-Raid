@@ -97,12 +97,13 @@ static uint8_t shown_duo_lives[2];
 static uint8_t masks[OBJECT_IMAGE_COUNT][32], sprite_colors[OBJECT_IMAGE_COUNT][16];
 static uint8_t widths[OBJECT_IMAGE_COUNT], scales[OBJECT_IMAGE_COUNT];
 static uint8_t reverse_bits[256];
-/* Companion of each native bridge block; it scrolls with that block. */
+/* Road companion survives its bridge; it scrolls and resets with the block. */
 typedef struct {
     int16_t x;
     uint8_t status, direction, explosion;
 } tank_t;
-static tank_t tanks[6];
+_Static_assert(sizeof(tank_t)==5, "Road tank layout used by sync_tanks");
+tank_t tanks[6];
 static uint8_t tank_bonus;
 
 /* Two independent bank tanks, with one harmless round / dangerous splash
@@ -146,7 +147,7 @@ static uint8_t edge_left[96], edge_right[96], edge_valid[96];
 static uint8_t shore_left, shore_right, shore_outer, shore_inner, shore_base, shore_color;
 static uint8_t keys[32], pads[40], inputs[2], previous_input, previous_keys;
 static uint8_t paused, switches=0x0b, palette_mask, palette_xor;
-static uint8_t tank_track_phase;
+uint8_t tank_track_phase;
 static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
@@ -715,43 +716,15 @@ static uint8_t opaque(uint8_t id,uint8_t x,uint8_t y,uint8_t flip,uint8_t block)
     if (flip) x=7-x;
     return masks[id][y]&(0x80>>x);
 }
-static void sync_tanks(void)
-{
-    uint8_t n,seed;
-    for (n=0;n<6;++n) {
-        if (ID(n)!=8) {
-            if (tanks[n].status) {tanks[n].status=0; tanks[n].explosion=0;}
-            continue;
-        }
-        if (tanks[n].status) continue;
-        seed=G(0xa6+n)^G(0xac+n)^G(0xbd);
-        tanks[n].direction=seed&1;
-        /* Start fully outside the playfield, then drive in along the road. */
-        tanks[n].x=tanks[n].direction ? RIVER_WIDTH : -TANK_WIDTH;
-        tanks[n].status=1;
-    }
-}
-static void move_tanks(void)
-{
-    uint8_t n;
-    /* Three phases, four native frames each, including counter wrap.
-     * This update runs only when the game is not paused. */
-    if (!(FRAME&3) && ++tank_track_phase==3) tank_track_phase=0;
-    sync_tanks();
-    if (MODE) return;
-    for (n=0;n<6;++n) {
-        if (tanks[n].explosion) --tanks[n].explosion;
-        if (tanks[n].status!=1 || (FRAME&1)) continue;
-        tanks[n].x+=tanks[n].direction ? -1 : 1;
-        if (tanks[n].x<=-TANK_WIDTH) tanks[n].direction=0;
-        if (tanks[n].x>=RIVER_WIDTH) tanks[n].direction=1;
-    }
-}
+void sync_tanks(void);
+void move_tanks(void);
+#pragma code-name(push, "CODE")
 static uint8_t tank_on_bridge(uint8_t n)
 {
     int16_t center=tanks[n].x+4,bridge=object_x(n);
-    return tanks[n].status==1 && center>=bridge && center<bridge+widths[8];
+    return ID(n)==8 && tanks[n].status==1 && center>=bridge && center<bridge+widths[8];
 }
+#pragma code-name(pop)
 static void destroy_tank(uint8_t n)
 {
     tanks[n].status=2; tanks[n].explosion=12; tank_bonus=1;
@@ -1046,7 +1019,7 @@ static void collisions(void)
         --n; /* The TIA kernel visits upper blocks before lower blocks. */
         id=ID(n); if (id>BALLOON_ID) continue;
         ox=object_x(n); oy=128+OFFSET-(int16_t)n*32;
-        if (!ready && !MODE && id==8 && tanks[n].status==1) {
+        if (!ready && !MODE && (id==8 || id<4) && tanks[n].status==1) {
             static int16_t tx;
             static uint8_t tf;
             tx=tanks[n].x; tf=tanks[n].direction;
@@ -1354,7 +1327,7 @@ static void render(void)
             sprites[9]=sprites[n+2];
             sprites[9].x+=sprites[n+2].x<0 ? 320 : -320;
         }
-        if (id==8 && (tanks[n].status==1 || tanks[n].explosion)) {
+        if ((id==8 || id<4) && (tanks[n].status==1 || tanks[n].explosion)) {
             uint8_t ti=tanks[n].status==1 ? TANK_ID : 1;
             sprites[n+10].x=tanks[n].x*2; sprites[n+10].y=sprites[n+2].y;
             sprites[n+10].image=ti==TANK_ID ? tank_image() : image_address(ti);

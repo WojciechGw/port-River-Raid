@@ -22,6 +22,152 @@
 .import _ready
 .export _present_frame
 .import _terrain, _sprites, _footer_offset
+.export _sync_tanks, _move_tanks
+.import _tanks, _tank_track_phase
+.segment "SPLASH"
+; Road tank motion, including stopping its whole body before a broken deck.
+_move_tanks:
+    lda $82
+    and #3
+    bne @sync
+    inc _tank_track_phase
+    lda _tank_track_phase
+    cmp #3
+    bne @sync
+    lda #0
+    sta _tank_track_phase
+@sync:
+    jsr _sync_tanks
+    lda $c6
+    bne @done
+    ldx #25
+    ldy #5
+@tank:
+    lda _tanks+4,x
+    beq @live
+    dec _tanks+4,x
+@live:
+    lda _tanks+2,x
+    cmp #1
+    bne @next
+    lda $82
+    and #1
+    bne @next
+    lda _tanks+3,x
+    bne @left
+    lda $a0,y
+    cmp #8
+    beq @right_move
+    lda _tanks+1,x
+    bmi @right_move
+    lda _tanks,x
+    cmp #47                 ; 56 - tank width 9
+    bcs @next
+@right_move:
+    inc _tanks,x
+    bne @right_edge
+    inc _tanks+1,x
+@right_edge:
+    lda _tanks+1,x
+    bne @next
+    lda _tanks,x
+    cmp #160
+    bcc @next
+    lda #1
+    sta _tanks+3,x
+    bne @next
+@left:
+    lda $a0,y
+    cmp #8
+    beq @left_move
+    lda _tanks,x
+    cmp #105                ; stop at the deck's right edge, X=104
+    bcc @next
+@left_move:
+    lda _tanks,x
+    bne @left_low
+    dec _tanks+1,x
+@left_low:
+    dec _tanks,x
+    lda _tanks+1,x
+    bpl @next
+    lda _tanks,x
+    cmp #$f8                ; reverse at X=-9
+    bcs @next
+    lda #0
+    sta _tanks+3,x
+@next:
+    txa
+    sec
+    sbc #5
+    tax
+    dey
+    bpl @tank
+@done:
+    rts
+
+; Six five-byte road companions: x (word), status, direction, explosion.
+; Keep the common empty-block path short, including both DUO collision passes.
+_sync_tanks:
+    ldx #25
+    ldy #5
+@block:
+    lda $a0,y
+    cmp #8
+    beq @bridge
+    cmp #4
+    bcs @clear
+    ; An exploded bridge retains its road tank. Destroy only a tank whose
+    ; center is on the deck [56,104), also for a bridge hit by the plane.
+    lda _tanks+2,x
+    cmp #1
+    bne @next
+    lda _tanks+1,x
+    bne @next
+    lda _tanks,x
+    cmp #52
+    bcc @next
+    cmp #100
+    bcs @next
+    lda #2
+    sta _tanks+2,x
+    lda #12
+    sta _tanks+4,x
+    bne @next
+@clear:
+    lda #0
+    sta _tanks+2,x
+    sta _tanks+4,x
+    beq @next
+@bridge:
+    lda _tanks+2,x
+    bne @next
+    lda $a6,y
+    eor $ac,y
+    eor $bd
+    and #1
+    sta _tanks+3,x
+    beq @left
+    lda #160
+    sta _tanks,x
+    lda #0
+    beq @spawn
+@left:
+    lda #$f7                ; x=-9, entire tank outside the left screen edge
+    sta _tanks,x
+    lda #$ff
+@spawn:
+    sta _tanks+1,x
+    lda #1
+    sta _tanks+2,x
+@next:
+    txa
+    sec
+    sbc #5
+    tax
+    dey
+    bpl @block
+    rts
 .segment "CODE"
 
 ; Present the prepared world immediately after VSYNC, before the VGA reaches

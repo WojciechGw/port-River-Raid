@@ -484,6 +484,7 @@ def main():
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
     parser.add_argument("--controls-only",action="store_true")
+    parser.add_argument("--bridge-tanks-only",action="store_true")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")
@@ -532,6 +533,12 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    if args.bridge_tanks_only:
+        from bridge_tank_checks import run_bridge_tank_checks
+        run_bridge_tank_checks(case,sym,fixture,resume)
+        print(f"All {count} bridge tank checks passed.",flush=True)
+        return
 
     if args.controls_only:
         from help_checks import run_help_checks
@@ -1828,6 +1835,8 @@ def main():
     case("restart-and-palette-performance", commands)
     from duo_checks import run_duo_checks
     run_duo_checks(case,sym,boot,output)
+    from bridge_tank_checks import run_bridge_tank_checks
+    run_bridge_tank_checks(case,sym,fixture,resume)
     from help_checks import run_help_checks
     run_help_checks(case,sym,boot,output)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)

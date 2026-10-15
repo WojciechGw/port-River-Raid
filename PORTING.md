@@ -49,6 +49,12 @@ state moves with the terrain block, pause stops its movement, and restarting
 or respawning restores its state. A tank on the land portion of the road
 awards 250 points; hitting a bridge with a tank on its span destroys both
 objects and awards 750 points in total instead of 500.
+A tank still on either approach survives bridge destruction, remains visible
+and shootable, and stops with its body before the broken deck (X=47 from the
+left or X=104 from the right). Destroying the bridge alone awards 500 points.
+The companion persists through the bridge's explosion and empty-object states
+until its terrain block scrolls away or the section restarts. Road tank
+synchronization and motion use compact 6502 helpers to keep DUO within a frame.
 The additional 250 points use the original decimal digit pointers, reserve
 awards every 10,000 points, the limit of nine lives, and score overflow behavior.
 From bridge seven, up to two additional tanks approach from the sides,
