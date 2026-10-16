@@ -110,7 +110,7 @@ static const uint8_t bridge_road[20]={
 static const uint8_t balloon_colors[14]={
     0,0x2a,0xd8,0xc8,0xb8,0xa6,0x96,0x86,0x76,0x56,0x46,0x36,0x26,0x22
 };
-static const char balloon_pixels[20][9]={
+static const char balloon_pixels[20][8]={
     "..1111..",
     ".222222.",
     ".333333.",
@@ -137,7 +137,7 @@ static const uint8_t tank_colors[3]={0,0x00,0x08};
 /* Native ship, top to bottom at block rows 16..23. X = opaque,
  * . = transparent. Each column is doubled horizontally by the renderer.
  * Preserve the native palette slots used by the two-row color bands. */
-static const char ship_pixels[8][9]={
+static const char ship_pixels[8][8]={
     "...X....",
     "...X....",
     "..XX....",
@@ -154,12 +154,14 @@ static const uint8_t ship_colors[16]={
 /* Tank rounds fly horizontally; white impact circles damage the jet.
  * W = white shell (impact palette), E = pale yellow destruction flash. */
 #pragma rodata-name(push, "SPLASH")
-static const char tank_shell_pixels[3][9]={
+/* Fixed-width pixel rows are indexed by column, never used as C strings.
+ * Omit terminating zeros to keep code/data below CPB's $FE00 page. */
+static const char tank_shell_pixels[3][8]={
     "........",
     "..WWW...",
     "........"
 };
-static const char tank_blast_pixels[8][9]={
+static const char tank_blast_pixels[8][8]={
     "...EE...",
     ".E.EE.E.",
     "..EEEE..",
@@ -172,7 +174,7 @@ static const char tank_blast_pixels[8][9]={
 /* Native enemy plane, top to bottom at block rows 14..19. X = opaque,
  * . = transparent. Keep palette slots 7..9 for the native two-row bands;
  * colors below run from the bottom band to the top band. */
-static const char enemy_plane_pixels[6][9]={
+static const char enemy_plane_pixels[6][8]={
     "X.......",
     "XX...XX.",
     "XXXXXXXX",
@@ -185,7 +187,7 @@ static const uint8_t enemy_plane_colors[3]={0xac,0x9c,0x8c};
  * R = salmon rotor, D = dark blue fuselage stripe. In the firing variant
  * B and D use olive instead. IDs 5/6 still select the two rotor frames. */
 static const uint8_t helicopter_colors[6]={0,0x00,0xb0,0x38,0x80,0x14};
-static const char helicopter_pixels[2][9][9]={
+static const char helicopter_pixels[2][9][8]={
     {
         ".....RRR",
         "...RRR..",
@@ -211,7 +213,7 @@ static const char helicopter_pixels[2][9][9]={
 };
 /* Filled white water explosions: 4, 8 and 16 canvas pixels in diameter.
  * Logical pixels are twice as wide as high. W = white, . = transparent. */
-static const char tank_circle_pixels[3][16][9]={
+static const char tank_circle_pixels[3][16][8]={
     {
         "........",
         "........",
@@ -467,7 +469,7 @@ static const uint8_t bank_pattern[4][4]={
 /* Monochrome bitmaps below: X = set pixel, . = clear pixel.
  * Rows run top to bottom; characters run left to right.
  * Reserve pixels use the player color; clear pixels are transparent. */
-static const char reserve_plane[8][9] = {
+static const char reserve_plane[8][8] = {
     "...X....",
     "...X....",
     "..XXX...",
@@ -524,7 +526,7 @@ static const char bridge_label[6][29] = {
 };
 
 /* Fuel frame, E, F and 1/2, reconstructed from unobscured reference pixels. */
-static const char fuel_gauge[16][40] = {
+static const char fuel_gauge[16][39] = {
     "XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
     "X.XX...............X...............XX.X",
     "X.XX...............X...............XX.X",

@@ -488,12 +488,25 @@ def main():
     parser.add_argument("--screens-only",action="store_true")
     parser.add_argument("--controls-only",action="store_true")
     parser.add_argument("--bridge-tanks-only",action="store_true")
+    parser.add_argument("--missiles-only", action="store_true")
+    parser.add_argument("--cpb", action="store_true", help="Emulate PICO-SRAM-BANKED registers")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")
     output = build / "checks"
     output.mkdir(exist_ok=True)
-    count = 0
+    # Validate the actual package, including CRCs and every RAM asset. The
+    # emulator loads RAM directly; it does not exercise the PICO's write /
+    # reset / verify sequence, which overwrites CPB's counter at $FED5.
+    sys.path.insert(0, str(ROOT / "tools"))
+    from rp6502 import ROM
+    load_image = ROM()
+    load_image.add_rom_file(str(build / "riverraid.rp6502"))
+    reserved = sorted(a for a in load_image.alloc if 0xFE00 <= a < 0xFFFA)
+    assert not reserved, f"ROM loads into CPB / I/O registers at ${reserved[0]:04X}"
+    assert load_image.has_reset_vector(), "ROM lacks its reset vector"
+    print("PASS load-map-cpb-and-io", flush=True)
+    count = 1
 
     def case(name, commands, fill="random", gameplay=True,rom_args=()):
         nonlocal count
@@ -507,6 +520,7 @@ def main():
             str(args.emulator.resolve()), str(build / "riverraid.rp6502"),
             "--script", str(script), "--mute", "--phi2", "8000", "--seed", "42",
             "--fill", fill, "--save-dir", str(output / "save"),
+            *(["--cpb"] if args.cpb else []),
             "--",*rom_args,
         ], cwd=ROOT, text=True, capture_output=True, timeout=60)
         # Some emulator releases report a script error with exit code zero.
@@ -536,6 +550,12 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    if args.missiles_only:
+        from missile_checks import run_missile_checks
+        run_missile_checks(case, sym, boot, fixture, resume)
+        print(f"All {count} missile checks passed.", flush=True)
+        return
 
     if args.bridge_tanks_only:
         from bridge_tank_checks import run_bridge_tank_checks
@@ -602,11 +622,7 @@ def main():
     outro_pixels,outro_palette=bitmap_source("outro")
     # Use the SDK's ROM parser to verify these are named files inside the
     # cartridge, loaded on demand rather than prepopulated XRAM chunks.
-    sys.path.insert(0,str(ROOT / "tools"))
-    from rp6502 import ROM
-    rom=ROM()
-    rom.add_rom_file(str(build / "riverraid.rp6502"))
-    assets=dict(rom.assets)
+    assets=dict(load_image.assets)
     assert assets["cover.bin"]==expected_pixels
     assert assets["cover-fade.bin"]==(build / "cover_fade.bin").read_bytes()
     assert assets["cover-prompt.bin"]==(build / "cover_prompt.bin").read_bytes()
@@ -615,7 +631,7 @@ def main():
         assert assets[f"{name}.bin"]==pixels
         assert assets[f"{name}-fade.bin"]==(build / f"{name}_fade.bin").read_bytes()
     assert assets["manual-prompt.bin"]==(build / "manual_prompt.bin").read_bytes()
-    assert not any(0x11000<=a<0x1f100 for a in rom.data), "Cover was preloaded to XRAM"
+    assert not any(0x11000<=a<0x1f100 for a in load_image.data), "Cover was preloaded to XRAM"
 
     commands=["wait xram:0x00b0 1 180"]
     for level in range(1,64):
@@ -676,8 +692,10 @@ def main():
     commands = leave_cover + ["wait xram:0x00b4 2 120", "wait xram:0x00b0 1 10"]
     for level in range(1,64):
         commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
+    # Eight rows of 1bpp pixels occupy as many bytes as the prompt's width.
+    manual_prompt_width = len(assets["manual-prompt.bin"])
     commands += ["wait xram:0x02a4 222 3", "dump xram:0x1000 57600",
-        "dump xram:0x02a0 14", "dump xram:0x0900 192", "run 2", "mark",
+        "dump xram:0x02a0 14", f"dump xram:0x0900 {manual_prompt_width}", "run 2", "mark",
         "run 240", "expect-same", "peek xram:0x00b4 2", "peek xram:0x00b0 2",
         f'shot "{(output / "manual-full.png").as_posix()}"',
         "press space", "wait xram:0x00b0 3 3"]
@@ -689,7 +707,8 @@ def main():
     _,buffers=case("manual-fades-and-wait",commands)
     assert buffers[:63]==[manual_palette(i) for i in range(1,64)]
     assert buffers[63]==manual_pixels
-    assert struct.unpack("<BBhhhhHH",buffers[64])==(0,0,64,222,192,8,0x0900,0x0850)
+    assert struct.unpack("<BBhhhhHH",buffers[64])==(0,0,(320-manual_prompt_width)//2,
+                                                  222,manual_prompt_width,8,0x0900,0x0850)
     assert buffers[65]==assets["manual-prompt.bin"] and any(buffers[65])
     assert buffers[66:]==[manual_palette(i) for i in reversed(range(64))]
     for key in ("q","f3","p","escape","lctrl"):
@@ -1848,6 +1867,8 @@ def main():
     run_bridge_tank_checks(case,sym,fixture,resume)
     from help_checks import run_help_checks
     run_help_checks(case,sym,boot,output)
+    from missile_checks import run_missile_checks
+    run_missile_checks(case,sym,boot,fixture,resume)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

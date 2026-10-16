@@ -170,12 +170,12 @@ static void duo_render(void)
             s->x=(duo_p->x+(duo_p->reflect!=0))*2; s->y=RIVER_TOP+duo_p->y;
             s->image=XRAM_DUO_JETS+(duo_p->timer ? 160 :
                 duo_p->shape==(uint16_t)rr_JetMove-1 ? 80 : 0);
-            s->palette=n ? XRAM_DUO_PALETTE : XRAM_JET_PALETTE;
+            shot->palette=s->palette=n ? XRAM_DUO_PALETTE : XRAM_JET_PALETTE;
             s->size=0x41; s->options=0x42|(duo_p->reflect ? 0x10 : 0);
         }
         if (duo_p->state==1 && duo_p->missile_y<=161) {
             s=shot; s->x=duo_p->missile_x*2; s->y=RIVER_TOP+153-(int16_t)duo_p->missile_y;
-            s->image=BULLET_IMAGE; s->palette=XRAM_PALETTE; s->size=0x10; s->options=0x42;
+            s->image=BULLET_IMAGE; s->size=0x10; s->options=0x42;
         }
     }
     sprites[0]=sprites[PLAYER_SPRITE]; sprites[1].y=-256;

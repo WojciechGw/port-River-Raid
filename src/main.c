@@ -605,7 +605,7 @@ static void prepare_images(void)
         }
     }
     xram0_set(BULLET_IMAGE,0,16);
-    for (y=0;y<8;++y) xram0_poke8(BULLET_IMAGE+y*2,0x80);
+    for (y=0;y<8;++y) xram0_poke8(BULLET_IMAGE+y*2,0x10);
     for (y=0;y<8;++y) {
         memset(row,0,4);
         for (x=0;x<8;++x) if (tank_blast_pixels[y][x]!='.')
@@ -1325,7 +1325,7 @@ static void render(void)
     if (ready) sprites[0].y=-256;
     if (!ready && MY<=161) {
         sprites[1].x=MX*2; sprites[1].y=RIVER_TOP+153-(int16_t)MY;
-        sprites[1].image=BULLET_IMAGE; sprites[1].palette=XRAM_PALETTE;
+        sprites[1].image=BULLET_IMAGE; sprites[1].palette=XRAM_JET_PALETTE;
         sprites[1].size=0x10; sprites[1].options=0x42;
     }
     for (n=0;n<6;++n) {

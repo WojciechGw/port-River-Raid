@@ -330,6 +330,8 @@ boot_state:
     stx RIA_RW0
     rts
 
+; File helpers live below $C000 to reserve the entire $FE00 CPB page.
+.segment "CODE"
 boot_open:
     sta ptr1
     stx ptr1+1
@@ -369,6 +371,7 @@ boot_close:
     sta boot_fd+1
     rts
 
+.segment "SPLASH"
 boot_error:
     lda boot_fd+1
     bmi @closed

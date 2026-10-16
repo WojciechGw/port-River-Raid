@@ -40,6 +40,10 @@ In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
 image remains unchanged. Missile guidance is toggled independently with
 F5 for player 1 and F8 for player 2. F4 toggles color/black and white.
+Missiles launch four logical columns from the plane's left edge, one column
+left of the Atari offset. Rendering and collisions use this same position.
+Each missile uses color 1 of its own plane's palette, including both DUO
+pilots and black-and-white mode.
 F9 toggles all sound without pausing the game or changing the audio backend.
 It acts once per press and retains its setting across restart, mode changes
 and the F1 manual. Sound starts enabled when the program is launched.
@@ -295,9 +299,17 @@ palettes/descriptors and redraws the HUD without advancing game logic.
 The VSYNC baseline is reset so time spent in help is not counted as dropped
 game frames. Audio is reinitialized using the selected backend.
 The cover helpers and tank extension code/state share free CPU memory from
-$D000 through $FEFF, after the original ROM and before the reserved I/O page,
+$D000 through $FDFF, after the original ROM and before CPB's reserved page,
 with scene tables in RODATA and small writable state in DATA below the
-reference ROM. After the manual fades out, the program restores the footer
+reference ROM. The linker reserves the entire $FE00-$FEFF page for
+PICO-SRAM-BANKED (CPB):
+the module rewrites its reset counter at $FED5 whenever the loader resets
+the CPU between writing and verifying RAM. Loading code there causes
+`?Verify failed at $FED5`; $FED6/$FED7 also hold periodically updated
+temperature values. Fixed-width sprite rows omit unused string terminators
+to fit below $FE00. The sound status helper and its configuration table
+live below $C000 so the high segment fits below these registers.
+After the manual fades out, the program restores the footer
 strip from a ROM asset, and game initialization restores the remaining assets
 in the reused XRAM.
 Escape stops audio before reusing the cover's XRAM and palette for the farewell

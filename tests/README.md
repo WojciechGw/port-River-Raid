@@ -1,6 +1,14 @@
 # Testy portu
 
 Po zbudowaniu Release: `python tests/emulator_checks.py`.
+`python tests/emulator_checks.py --cpb --missiles-only` sprawdza przesunięte
+miejsce wystrzału i zgodność koloru pocisku z samolotem w GAME 1, GAME 2
+i DUO, dla obu graczy, pocisków kierowanych/prostych i trybu czarno-białego.
+Opcja `--cpb` uruchamia te same scenariusze z modułem PICO-SRAM-BANKED.
+Każdy zestaw sprawdza CRC bloków ROM-u i wyklucza dane w obszarze
+`$FE00-$FFF9` (cała strona CPB i I/O). Emulator ładuje RAM bez sprzętowej
+sekwencji zapis/reset/weryfikacja, dlatego sama próba uruchomienia w nim gry
+nie wykrywa kolizji z licznikiem resetów CPB pod `$FED5`.
 `python tests/emulator_checks.py --bridge-tanks-only` sprawdza przetrwanie
 czołgów na dojazdach po zniszczeniu mostu, zatrzymanie przed przerwą,
 punktację, bezpośrednie trafienia oraz przewijanie i restart etapu.

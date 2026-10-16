@@ -88,7 +88,7 @@ def generate(source):
                2132: 'LDY    EnemyIdTab,X', 2133: '.newFuel:',
                2250: 'LDA    InitTab,X', 1409: '.checkCollisions:',
                317: 'LDA    #<One', 1830: 'ADC    #DIGIT_H',
-               1324: 'LDA    SWCHA', 1655: 'LDX    #MIN_MISSILE',
+               1324: 'LDA    SWCHA', 1655: 'LDX    #MIN_MISSILE', 1659: 'ADC    #$05',
                1666: 'DoSound:', 1819: 'EOR    #$01',
                1809: 'STA    player', 1826: 'STA    player', 3610: 'LDA    gameVariation'}
     raw_lines = source.splitlines()
@@ -139,6 +139,9 @@ def generate(source):
             # Store absolute screen missile coordinates at launch. Later
             # throttle changes must not drag an already airborne missile.
             code += '\nLDA _duo_call\nbeq port_missile_origin\nLDA #142+MIN_MISSILE\nSEC\nSBC _player_y\nTAX\nport_missile_origin:'
+        if number == 1659:
+            # Align the muzzle one logical column left, including collision X.
+            code = 'ADC #$04'
         if number == 1590:
             code = 'JSR port_life_limit'
         if number == 1666:

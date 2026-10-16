@@ -8,7 +8,8 @@ SOUND_ICON = $02C0
 SOUND_TEXT = $02C8
 WHITE_PALETTE = $BF80          ; Transparent black / opaque white; follows fade.
 
-.segment "SPLASH"
+; Use low RAM to keep the auxiliary segment below CPB's $FE00 page.
+.segment "CODE"
 _sound_status_init:
     lda #1
     sta RIA_STEP0
@@ -45,12 +46,12 @@ sound_program:
     lda #RIA_OP_XREG
     sta RIA_OP
     jmp RIA_SPIN
+.segment "RODATA"
 sound_config:
     .byte 0,0
     .word 16,0,4,1,SOUND_TEXT,WHITE_PALETTE,$FFFF
     .byte 0,0
     .word 0,0,8,8,SOUND_ICON,WHITE_PALETTE
-.segment "RODATA"
 sound_args:
     .byte 1,0,1, 0,1, 0,0, >SOUND_CONFIG,<SOUND_CONFIG, 0,0, 0,0, 0,8
     .byte 1,0,1, 0,3, 0,0, >SOUND_ICON_CONFIG,<SOUND_ICON_CONFIG, 0,1, 0,0, 0,8
