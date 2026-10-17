@@ -90,6 +90,7 @@ def main():
     parser.add_argument("outro_prompt", type=Path)
     parser.add_argument("--manual", type=Path, required=True)
     parser.add_argument("--outro", type=Path, required=True)
+    parser.add_argument("--duo-footer", type=Path, required=True)
     args = parser.parse_args()
     pixels, fades = build(args.source)
     footer_bytes = args.footer.stat().st_size
@@ -117,7 +118,8 @@ def main():
         f"OUTRO_PROMPT_WIDTH = {OUTRO_PROMPT_WIDTH}\n"
         f"MANUAL_PROMPT_BYTES = {len(manual_prompt)}\n"
         f"MANUAL_PROMPT_WIDTH = {MANUAL_PROMPT_WIDTH}\n"
-        f"DEMO_ASSET_BYTES = {footer_bytes}\n", encoding="utf-8")
+        f"DEMO_ASSET_BYTES = {footer_bytes}\n"
+        f"DUO_DEMO_ASSET_BYTES = {args.duo_footer.stat().st_size}\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

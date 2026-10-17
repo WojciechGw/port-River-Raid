@@ -30,6 +30,7 @@ else()
         VERBATIM)
     set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
     set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
+    set(RIVER_DUO_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/duo_demo_footer.bin)
     set(RIVER_COVER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/cover.bin)
     set(RIVER_COVER_FADES ${CMAKE_CURRENT_BINARY_DIR}/cover_fade.bin)
     set(RIVER_COVER_PROMPT ${CMAKE_CURRENT_BINARY_DIR}/cover_prompt.bin)
@@ -40,11 +41,11 @@ else()
     set(RIVER_OUTRO_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/outro.bin)
     set(RIVER_OUTRO_FADES ${CMAKE_CURRENT_BINARY_DIR}/outro_fade.bin)
     set(RIVER_COVER_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/cover.inc)
-    add_custom_command(OUTPUT ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
+    add_custom_command(OUTPUT ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER} ${RIVER_DUO_FOOTER_IMAGE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_footer.py
             ${CMAKE_CURRENT_SOURCE_DIR}/src/demo-footer.json
             ${CMAKE_CURRENT_SOURCE_DIR}/src/graphics.h
-            ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER}
+            ${RIVER_FOOTER_IMAGE} ${RIVER_FOOTER_HEADER} ${RIVER_DUO_FOOTER_IMAGE}
         DEPENDS src/demo-footer.json src/graphics.h tools/make_demo_footer.py
         VERBATIM)
     add_custom_command(OUTPUT ${RIVER_COVER_IMAGE} ${RIVER_COVER_FADES}
@@ -58,7 +59,8 @@ else()
             ${RIVER_OUTRO_PROMPT}
             --manual ${CMAKE_CURRENT_SOURCE_DIR}/assets/manual.bmp
             --outro ${CMAKE_CURRENT_SOURCE_DIR}/assets/outro.bmp
-        DEPENDS assets/cover.bmp assets/manual.bmp assets/outro.bmp tools/make_cover.py ${RIVER_FOOTER_IMAGE}
+            --duo-footer ${RIVER_DUO_FOOTER_IMAGE}
+        DEPENDS assets/cover.bmp assets/manual.bmp assets/outro.bmp tools/make_cover.py ${RIVER_FOOTER_IMAGE} ${RIVER_DUO_FOOTER_IMAGE}
         VERBATIM)
     add_custom_command(OUTPUT ${RIVER_CORE}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/port_original.py
@@ -66,7 +68,7 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm ${RIVER_CORE}
+        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm src/demo_footer.asm ${RIVER_CORE}
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
@@ -92,6 +94,7 @@ else()
     rp6502_asset(riverraid outro.bin ${RIVER_OUTRO_IMAGE})
     rp6502_asset(riverraid outro-fade.bin ${RIVER_OUTRO_FADES})
     rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
+    rp6502_asset(riverraid duo-demo-footer.bin ${RIVER_DUO_FOOTER_IMAGE})
     # Cover helpers and tank extensions share CPU RAM above the reference ROM.
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)
     rp6502_asset(riverraid RAM(0xD000) ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)

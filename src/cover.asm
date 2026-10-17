@@ -38,17 +38,9 @@ COVER_SCENE   = $00B4         ; 0 cover, 1 outro, 2 manual
 .macro boot_read address, count
     ; READ_XRAM's count is limited to $7FFF. Reject errors and short reads.
     xreg_values address, count
-    lda boot_fd
-    sta RIA_A
-    lda boot_fd+1
-    sta RIA_X
-    lda #RIA_OP_READ_XRAM
-    sta RIA_OP
-    jsr RIA_SPIN
-    cmp #<(count)
-    jne boot_error
-    cpx #>(count)
-    jne boot_error
+    lda #<(count)
+    ldx #>(count)
+    jsr boot_read_xram
 .endmacro
 
 .segment "CODE"
@@ -372,6 +364,23 @@ boot_close:
     rts
 
 .segment "SPLASH"
+; Shared checked read keeps room for the caption in the fixed CPU map.
+boot_read_xram:
+    sta boot_read_count
+    stx boot_read_count+1
+    lda boot_fd
+    sta RIA_A
+    lda boot_fd+1
+    sta RIA_X
+    lda #RIA_OP_READ_XRAM
+    sta RIA_OP
+    jsr RIA_SPIN
+    cmp boot_read_count
+    jne boot_error
+    cpx boot_read_count+1
+    jne boot_error
+    rts
+
 boot_error:
     lda boot_fd+1
     bmi @closed
@@ -406,6 +415,7 @@ boot_blink:  .byte 0
 boot_prompt_visible: .byte 0
 boot_scene: .byte 0
 boot_help: .byte 0
+boot_read_count: .word 0
 
 .assert COVER_IMAGE+2*COVER_HALF_BYTES <= $10000, error, "Cover exceeds XRAM"
 .assert COVER_FADE_FRAMES <= 128, error, "Fade counter range"

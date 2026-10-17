@@ -33,20 +33,20 @@ static const char sound_icons[2][8][9] = {
 /* Readable demo-footer text and thick 6-column glyphs are in src/demo-footer.json.
  * tools/make_demo_footer.py combines them with this reference logo. */
 
-/* Exact pixels from original/Atari 5200/river_raid_5.gif, x=48..167,
- * y=211..217. One character = two canvas pixels; the last row pads the
- * 60x7 logical image to the VGA sprite's 60x8 storage size.
+/* Activision logo
+ * One character = two canvas pixels; the last row pads the
+ * 64x7 logical image to the VGA sprite's 64x8 storage size.
  * . = transparent/black; A = purple, B = lettering, C = orange,
  * D = yellow, E = green, F = blue. */
-static const char activision_logo[8][61] = {
-    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB.BBBBBBBB....BBBBBBB.........",
-    "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCBB....B...B...BB...............",
-    "CCCCCCCCCCCCCCCCCCCCCCCCCCCCBBB.BB.B.B.B..BB..BBB.B.BBB.B..B",
-    "DDDDDDDDDDDDDDDDDDDDDDDDDDDBB.B.B..B.B.B.BB.B.B...B.B.B.BB.B",
-    "EEEEEEEEEEEEEEEEEEEEEEEEEEBBBBB.B..B.B.BBB..B.BBB.B.B.B.BBBB",
-    "EEEEEEEEEEEEEEEEEEEEEEEEEBB...B.B..B.B.BB...B...B.B.B.B.B.BB",
-    "FFFFFFFFFFFFFFFFFFFFFFFFBB....B.BB.B.B.B....B.BBB.B.BBB.B..B",
-    "............................................................"
+static const char activision_logo[8][63] = {
+    "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB.BBBBBBBB....BBBBBBB.........",
+    "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCBB....B...B...BB...............",
+    "CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCBBB.BB.B.B.B..BB..BBB.B.BBB.B..B",
+    "DDDDDDDDDDDDDDDDDDDDDDDDDDDDDBB.B.B..B.B.B.BB.B.B...B.B.B.BB.B",
+    "EEEEEEEEEEEEEEEEEEEEEEEEEEEEBBBBB.B..B.B.BBB..B.BBB.B.B.B.BBBB",
+    "EEEEEEEEEEEEEEEEEEEEEEEEEEEBB...B.B..B.B.BB...B...B.B.B.B.B.BB",
+    "FFFFFFFFFFFFFFFFFFFFFFFFFFBB....B.BB.B.B.B....B.BBB.B.BBB.B..B",
+    ".............................................................."
 };
 /* GIF RGB colors rounded to the nearest RGB555 components. */
 static const uint8_t activision_colors[6][3] = {

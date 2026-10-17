@@ -62,14 +62,12 @@ def run_help_checks(case, sym, boot, output):
             opening+closing+['expect-same']+text_dump+[
             'press f4','run 3','release f4','run 3','dump xram:0xbf80 4']+text_dump,
             rom_args=options)
-        assert struct.unpack('<BBhhhhHHH',data[0][:16])==(0,0,16,0,4,1,0x02c8,0xbf80,0xffff)
-        assert struct.unpack('<BBhhhhHH',data[0][16:])==(0,0,0,0,8,8,0x02c0,0xbf80)
+        assert struct.unpack('<BBhhhhHHH',data[0][:16])==(0,0,296,232,3,1,0x02c8,0xbf80,0xffff)
+        assert struct.unpack('<BBhhhhHH',data[0][16:])==(0,0,280 if verbose else 312,232,8,8,0x02c0,0xbf80)
         assert data[1]==data[8]==bytes((0,0,255,255)), 'Status is not white on black'
-        on=note+b'OPL2' if verbose else bytes(8)+b'    '
-        off=muted+(b'OPL2' if verbose else b'    ')
-        assert data[2:8]==[on,off,
-            muted+(b'PCM ' if verbose else b'    '),
-            muted+(b'PSG ' if verbose else b'    '),on,on]
+        on=note+b'OPL ' if verbose else bytes(8)+b'    '
+        off=muted+(b'OPL ' if verbose else b'    ')
+        assert data[2:8]==[on,off,off,off,on,on]
         assert data[9]==on
     snapshot = ["dump 0x80 128", "dump xram:0x0200 16",
                 "dump xram:0x0800 7680", "dump xram:0xa000 5920",

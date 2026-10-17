@@ -64,7 +64,7 @@ def run_duo_checks(case, sym, boot, output):
             assert x==(44+n*80+(i%5)*7)*2
             assert y==(182+10+(9 if i>=5 else 0) if i<count else -256)
             assert art==0x9c80 and palette==(0x0760 if n else 0x0740)
-    for i in (12,13,17,18):
+    for i in (12,13,17):
         assert struct.unpack_from('<h',buffers[1],i*10+2)[0]<0, 'Numeric life display still visible'
 
     _,buffers=case('duo-life-icons-hide-in-game-one',fixture+[

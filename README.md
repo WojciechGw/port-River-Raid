@@ -80,8 +80,10 @@ No parameter selects OPL2. `/auto` selects PCM when supported, otherwise OPL2.
 Explicit `/pcm` reports an error if the firmware lacks PCM.
 Options are case insensitive; if several audio backends are supplied, the last one wins.
 Add `/v` (for example, `load riverraid.rp6502 /opl2 /v`) to show the sound
-icon and PSG/OPL2/PCM label in the top margin. Without `/v`, the margin only
-shows a crossed-out note when F9 has muted sound; it is blank when sound is on.
+icon and PSG/OPL/PCM label in the bottom-right corner below the scroller.
+Without `/v`, a crossed-out note appears when F9 has muted sound, and F10
+shows the selected backend for five seconds, aligned with the right screen
+edge. The note moves to its left while the label is visible. F10 is ignored while muted.
 `/help` displays usage without opening the cover.
 In the emulator, put the game arguments after `--`:
 
@@ -118,7 +120,7 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |
 | F9 | Sound on / off (all sounds) |
-| F10 | Cycle PSG → OPL2 → PCM → PSG; skip PCM if unsupported |
+| F10 | When unmuted, cycle PSG → OPL2 → PCM → PSG; show PSG/OPL/PCM for 5 seconds; skip PCM if unsupported |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |
@@ -132,6 +134,8 @@ In GAME 2, players switch after losing a plane; GAME 3 is simultaneous.
 
 In attract mode, the footer scrolls a light gray caption containing the game
 title, author, copyright dates, Activision logo, and instructions for starting.
+The complete static Activision logo also stays at the bottom-left corner
+below the caption, before starting and throughout GAME 1, GAME 2 and GAME 3.
 At startup, the program first displays `assets/cover.bmp` with a smooth fade in
 (about one second). Any key starts the fade out; once it finishes and the key
 is released, `assets/manual.bmp` fades in. The instructions wait for another
@@ -147,9 +151,17 @@ Escape displays `assets/outro.bmp` with a fade in and the white message
 "SEE YOU NEXT TIME!". After three seconds at full brightness, the image fades
 out completely before the program exits. Held keys do not interrupt this screen.
 The entire game screen fades in from black over about one second, including
-the river, objects, HUD and logo. The scrolling caption and demo start together
-as soon as the fade finishes, without an additional delay.
-The text and glyphs can be edited in `src/demo-footer.json`.
+the river, objects, HUD and logo. The demo starts as soon as the fade finishes.
+In all three modes, the caption holds its opening text for three seconds
+before scrolling. Selecting a mode or returning to attract mode repeats this hold.
+After every 320 pixels of scrolling, the caption pauses for one second before
+continuing. This cadence continues across the end of the caption.
+GAME 3 uses the same scrolling caption as GAME 1 and GAME 2.
+The text and glyphs can be edited in
+`src/demo-footer.json`.
+Every text cell uses a 6×7 glyph and two blank columns. The Activision logo
+is padded to 64 logical pixels. The entire strip is 960 logical pixels wide
+(six screens), displayed as 1920 VGA pixels with horizontal doubling.
 
 ## Emulator tests
 

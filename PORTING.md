@@ -49,15 +49,19 @@ It acts once per press and retains its setting across restart, mode changes
 and the F1 manual. Sound starts enabled when the program is launched.
 F10 cycles PSG → OPL2 → PCM → PSG, skipping PCM when the firmware rejects
 its interface. It stops the previous backend before initializing the next,
-preserves F9 mute and pause, and retains the selection through F1 and restart.
-With `/v`, the top-left margin shows an 8×8 musical note, crossed out when muted,
-followed by one blank character column and the current backend (PSG/OPL2/PCM).
-The icons are defined in `src/graphics.h` and drawn at (0,0) as a 1bpp bitmap;
-the backend starts at (16,0), using the VGA's built-in 8×8 font in
+ignores presses while F9 has muted sound, and retains the selection through
+F1 and restart. A successful F10 press shows PSG, OPL or PCM for 300 display
+frames (five seconds), including paused frames. Each new press restarts the
+timer; holding the key does not. Opening F1 dismisses the transient label.
+With `/v`, the note and backend remain visible. The icons are defined in
+`src/graphics.h` and drawn at (312,232) as a 1bpp bitmap;
+the backend starts at (296,232), with three characters aligned to the right
+screen edge. While it is visible, the note moves left to (280,232).
+The text uses the VGA's built-in 8×8 font in
 [character mode](https://picocomputer.github.io/vga.html). Both are white on
-the black margin, update only on F9/F10 or video initialization, and share
+the black margin below the scroller, update on F9/F10, expiry or initialization, and share
 the white splash palette for startup fade. Without `/v`, only the muted icon
-is shown; when sound is enabled, both the icon and backend text are blank.
+is shown, with a temporary backend label after F10 when sound is enabled.
 F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
@@ -253,11 +257,13 @@ black scanline. The score starts on panel row 5, GAME/BRIDGE on row 18,
 the fuel scale on row 17, and reserves on row 25. The `HUD_*` definitions
 at the start of `src/main.c` specify the field coordinates; changing the
 typeface does not require changes to the game logic.
-The black footer on scanlines 219–229 contains the Activision logo, copied
-pixel by pixel from `original/Atari 5200/river_raid_5.gif` (X 48–167, Y 211–217).
-The 120×7 bitmap preserves the lettering, five rainbow colors, and the diagonal
-connection to the letter A. It starts at canvas X 48, three rows below the
-top of the footer. A separate sprite and palette preserve the GIF's colors
+The static Activision logo stays at canvas (0,232), below the scrolling
+caption, both before starting and during all three game modes. Its complete
+62-column source in `src/graphics.h` is padded to 64×8 logical pixels,
+stored in 256 bytes at $5A00 and displayed 128 pixels wide. The sprite list
+extends through scanline 239 so the bottom rows remain visible. The bitmap
+preserves the lettering, five rainbow colors and diagonal connection to A.
+A separate sprite and palette preserve the logo's colors
 rounded to RGB555; the B&W switch and screensaver use the original color roles.
 
 Before initializing the game, `src/cover.asm` displays the cover image from
@@ -329,21 +335,29 @@ black before video planes are enabled; each update is copied at VSYNC in
 about 0.8 ms at 8 MHz, before the playfield is scanned. The scene remains
 stationary during the fade. XRAM $00B2 reports brightness (0..32), followed
 by the last publication's VSYNC byte. The scratch buffers do not overlap
-the PCM ring or OPL2 registers. Once the fade finishes, the caption and demo
-start in the same frame, without a countdown. The demo runs the
+the PCM ring or OPL2 registers. Once the fade finishes, the demo starts
+immediately. In all three modes, the caption holds at X=0 for 180 unpaused
+frames (three seconds) before scrolling. Every 320 pixels of actual movement
+adds a 60-frame (one-second) hold, including across a bitmap wrap. Pause
+freezes both countdowns. Entering a mode or returning to attract resets the
+cadence; F1 preserves its remaining time. The demo runs the
 original terrain generator and enemy movement; it skips plane controls,
 firing, fuel consumption, and player collisions.
-The typeface reproduces the bold 6×6 letters from Atari XL/5200 samples,
-in cells eight logical pixels wide; the wider "w" occupies seven columns,
-and an additional row accommodates lowercase descenders.
-TM uses raised 3×5 and 5×5 glyphs, without a preceding space. The same logo
-bitmap from `src/graphics.h` is inserted at `{Activision}`. The generator
+All text glyphs occupy 6×7 logical pixels, including lowercase descenders,
+followed by two transparent columns in each eight-pixel cell. The same logo
+bitmap from `src/graphics.h` is inserted at `{Activision}`, with transparent
+columns extending its 62-pixel width to 64. The complete strip spans exactly
+960 logical pixels (six 160-pixel screens), doubled to 1920 VGA pixels.
+Unused trailing cells remain transparent; overlong text fails the build. The generator
 `tools/make_demo_footer.py` prepares the entire strip when building the ROM;
 the program loads it into XRAM $3800 after dismissing the cover. VGA scrolls
 the bitmap with horizontal wrapping, without the CPU drawing letters each
 frame. A separate palette preserves the light gray text even during the
-screensaver. Pause stops the caption; starting a game restores the static
-logo, and game over restores scrolling.
+screensaver. Pause stops the caption; starting a game hides the caption,
+and game over restores scrolling. The static logo remains below it in all
+modes. GAME 3 uses the same
+strip at XRAM $3800 as GAME 1/2, without a prefix. All modes share the same
+visibility, pause and one-pixel-per-frame scrolling routine.
 
 The program computes pixel collisions before calling the original game
 logic, setting its collision flags. Assembly routines handle scanline
@@ -354,7 +368,7 @@ restarting, respawning, and player switching.
 
 The scroll position, object list, and caption offset are prepared in RAM
 during the preceding frame. Immediately after VSYNC, the `present_frame`
-assembly routine publishes them together to XRAM in about 0.3 ms at 8 MHz,
+assembly routine publishes them together to XRAM in under 0.5 ms at 8 MHz,
 before scanout reaches the first river scanline. Terrain and collision
 calculations do not delay this publication. The absence of skipped VSYNCs
 alone does not rule out tearing if the background position changes while

@@ -23,7 +23,8 @@
 .export _demo_tick
 .import _ready
 .export _present_frame
-.import _terrain, _sprites, _footer_offset
+.import _terrain, _sprites
+.importzp _footer_offset
 .export _sync_tanks, _move_tanks
 .import _tanks, _tank_track_phase, _road_gunner
 .segment "SPLASH"
@@ -222,19 +223,14 @@ _present_frame:
     sta RIA_ADDR0+1
     ldy #0
 @sprite:
-    .repeat 4
+    ; Two bytes per iteration keep publication compact and within vblank.
+    .repeat 2
     lda _sprites,y
     sta RIA_RW0
     iny
     .endrepeat
-    cpy #240
-    bne @sprite
-@tail:
-    lda _sprites,y
-    sta RIA_RW0
-    iny
     cpy #250
-    bne @tail
+    bne @sprite
     lda #$62
     sta RIA_ADDR0
     lda #$02
@@ -249,7 +245,7 @@ _present_frame:
     rts
 
 ; Called after input, before native rules and footer rendering. The startup
-; fade has finished; start the caption and demo together, without a delay.
+; fade has finished; start the demo while the caption holds its opening text.
 _demo_tick:
     lda $282
     lsr a

@@ -1,16 +1,25 @@
-; Fixed 8x8 VGA text in the unused top margin. Addresses match xram.h.
+; Backend text and 8x8 note in the bottom-right corner below the scroller.
+; Addresses match xram.h.
 .include "rp6502.inc"
 .export _sound_status_init, _sound_status_update
+.export _sound_status_notify, _sound_status_tick
 .import _audio_muted, _audio_backend, _sound_icons, _sound_verbose
 SOUND_CONFIG = $0220
 SOUND_ICON_CONFIG = $0230
 SOUND_ICON = $02C0
 SOUND_TEXT = $02C8
 WHITE_PALETTE = $BF80          ; Transparent black / opaque white; follows fade.
+SOUND_ICON_X = 320-8
+SOUND_ICON_Y = 240-8
+
+.segment "ZEROPAGE"
+sound_notice: .res 2
 
 ; Use low RAM to keep the auxiliary segment below CPB's $FE00 page.
 .segment "CODE"
 _sound_status_init:
+    stz sound_notice
+    stz sound_notice+1
     lda #1
     sta RIA_STEP0
     lda #<SOUND_CONFIG
@@ -25,7 +34,7 @@ _sound_status_init:
     cpy #30
     bne @config
     jsr _sound_status_update
-    ; Text on plane 0, icon bitmap on plane 1, both in scanlines 0..7.
+    ; Text on plane 0 and icon on plane 1 below the scroller.
     ldy #0
     jsr sound_program
     cpx #0
@@ -49,21 +58,56 @@ sound_program:
 .segment "RODATA"
 sound_config:
     .byte 0,0
-    .word 16,0,4,1,SOUND_TEXT,WHITE_PALETTE,$FFFF
+    .word 296,SOUND_ICON_Y,3,1,SOUND_TEXT,WHITE_PALETTE,$FFFF
     .byte 0,0
-    .word 0,0,8,8,SOUND_ICON,WHITE_PALETTE
+    .word SOUND_ICON_X,SOUND_ICON_Y,8,8,SOUND_ICON,WHITE_PALETTE
 sound_args:
-    .byte 1,0,1, 0,1, 0,0, >SOUND_CONFIG,<SOUND_CONFIG, 0,0, 0,0, 0,8
-    .byte 1,0,1, 0,3, 0,0, >SOUND_ICON_CONFIG,<SOUND_ICON_CONFIG, 0,1, 0,0, 0,8
+    .byte 1,0,1, 0,1, 0,0, >SOUND_CONFIG,<SOUND_CONFIG, 0,0, 0,SOUND_ICON_Y, 0,SOUND_ICON_Y+8
+    .byte 1,0,1, 0,3, 0,0, >SOUND_ICON_CONFIG,<SOUND_ICON_CONFIG, 0,1, 0,SOUND_ICON_Y, 0,SOUND_ICON_Y+8
 
 .segment "CODE"
+; Count all 60 Hz display frames, including pause and attract mode.
+_sound_status_notify:
+    lda #<300
+    sta sound_notice
+    lda #>300
+    sta sound_notice+1
+    rts
+_sound_status_tick:
+    lda sound_notice
+    bne @decrement
+    lda sound_notice+1
+    beq @done
+    dec sound_notice+1
+@decrement:
+    dec sound_notice
+    lda sound_notice
+    ora sound_notice+1
+    beq _sound_status_update
+@done:
+    rts
+
 _sound_status_update:
     lda #1
     sta RIA_STEP0
+    ; Leave the rightmost 24 pixels to the label while it is visible.
+    ; Otherwise restore the note to the very corner.
+    lda #<(SOUND_ICON_CONFIG+2)
+    sta RIA_ADDR0
+    lda #>SOUND_ICON_CONFIG
+    sta RIA_ADDR0+1
+    lda _sound_verbose
+    ora sound_notice
+    ora sound_notice+1
+    beq @right
+    lda #<280
+    bra @position
+@right:
+    lda #<SOUND_ICON_X
+@position:
+    sta RIA_RW0
     lda #<SOUND_ICON
     sta RIA_ADDR0
-    lda #>SOUND_ICON
-    sta RIA_ADDR0+1
     lda _audio_muted
     asl a
     asl a
@@ -85,6 +129,8 @@ _sound_status_update:
     bne @icon
     ; Text follows the icon in XRAM; continue through the same port.
     lda _sound_verbose
+    ora sound_notice
+    ora sound_notice+1
     beq @text_index
     lda _audio_backend
     asl a
@@ -99,4 +145,4 @@ _sound_status_update:
     dex
     bne @backend
     rts
-sound_backends: .byte "    ","PSG ","OPL2","PCM "
+sound_backends: .byte "    ","PSG ","OPL ","PCM "

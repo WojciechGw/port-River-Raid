@@ -58,6 +58,8 @@ void demo_tick(void);
 void present_frame(void);
 int sound_status_init(void);
 void sound_status_update(void);
+void sound_status_notify(void);
+void sound_status_tick(void);
 void refresh_jet_palette(void);
 void show_cover(void);
 void show_outro(void);
@@ -90,12 +92,12 @@ uint8_t bank_half[20], tile_mirror[TERRAIN_TILE_COUNT];
 tile_config_t terrain = {0,1,0,RIVER_TOP,TERRAIN_COLUMNS,RIVER_RING,
     XRAM_TERRAIN,XRAM_PALETTE,XRAM_TILES};
 static bitmap_config_t hud_bitmap = {0,0,0,HUD_TOP,320,HUD_HEIGHT,XRAM_HUD,XRAM_PALETTE};
-static const bitmap_config_t demo_footer = {1,0,0,HUD_FOOTER_Y,DEMO_FOOTER_WIDTH,8,
-    XRAM_DEMO_FOOTER_IMAGE,XRAM_DEMO_FOOTER_PALETTE};
-uint16_t footer_offset;
-static uint8_t shown_demo=255;
+extern const bitmap_config_t demo_footer;
+extern uint16_t footer_offset;
+#pragma zpsym ("footer_offset")
+uint8_t shown_demo=255;
 sprite_t sprites[SPRITE_COUNT];
-static sprite_t hud_sprites[HUD_SPRITE_COUNT];
+sprite_t hud_sprites[HUD_SPRITE_COUNT];
 static uint8_t shown_duo_lives[2];
 static uint8_t masks[OBJECT_IMAGE_COUNT][32], sprite_colors[OBJECT_IMAGE_COUNT][16];
 static uint8_t widths[OBJECT_IMAGE_COUNT], scales[OBJECT_IMAGE_COUNT];
@@ -150,7 +152,8 @@ static uint8_t first_water[256], last_water[256];
 static uint8_t edge_left[96], edge_right[96], edge_valid[96];
 static uint8_t shore_left, shore_right, shore_outer, shore_inner, shore_base, shore_color;
 static uint8_t keys[32], pads[40], inputs[2], previous_input, previous_keys;
-static uint8_t paused, switches=0x0b, palette_mask, palette_xor;
+uint8_t paused;
+static uint8_t switches=0x0b, palette_mask, palette_xor;
 uint8_t tank_track_phase;
 uint8_t road_gunner=255;
 static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
@@ -166,7 +169,8 @@ static uint8_t fuel_rows[HUD_FUEL_HEIGHT][HUD_FUEL_WIDTH];
 static uint8_t score_rows[12][6];
 uint16_t tia_palette[128];
 static uint8_t shown_level=255, shown_variant=255, shown_player=255;
-static uint8_t shown_reserves=255, high_dirty=1;
+static uint8_t shown_reserves=255;
+uint8_t high_dirty=1;
 static uint8_t high_score[6]={88,88,88,88,88,0};
 #ifdef RIVER_PROFILE
 /* Max milliseconds: input, collisions, original rules, terrain, render, frame. */
@@ -1211,21 +1215,12 @@ static void hud_label(uint8_t x,uint8_t top,const char* text,uint8_t ink)
         write_hud_span(XRAM_HUD+(uint16_t)(top+y)*RIVER_WIDTH+x);
     }
 }
+void demo_footer_tick(void);
 static void hud_details(void)
 {
-    static uint8_t level,reserves,i,dirty,demo;
+    static uint8_t level,reserves,i,dirty;
+    demo_footer_tick();
     level=G(0xbd); reserves=G(0xc0)<80 ? G(0xc0)/8 : 0; dirty=high_dirty;
-    demo=ready || MODE==255;
-    if (shown_demo!=demo) {
-        hud_sprites[18].y=demo ? -256 : HUD_FOOTER_Y;
-        xram0_poke16(XRAM_DEMO_FOOTER_CONFIG+4,demo ? HUD_FOOTER_Y : -256);
-        footer_offset=0; xram0_poke16(XRAM_DEMO_FOOTER_CONFIG+2,0);
-        shown_demo=demo; dirty=1;
-    }
-    if (demo && ready!=1 && !paused) {
-        if (++footer_offset==DEMO_FOOTER_WIDTH) footer_offset=0;
-        /* Scroll with the prepared world at the next VSYNC. */
-    }
     if (shown_level!=level || shown_variant!=VAR) {
         /* Digit images are prepared once. Three sprites avoid rasterizing
          * extra numbers during the same frame as a reset and palette change. */
@@ -1453,7 +1448,6 @@ static void hud_layout(void)
             for (i=0;i<4;++i) draw_glyph(84+i*8,bitmap_row(bridge_label[y]+i*8));
             write_hud_span(XRAM_HUD+(uint16_t)(DUO_STAGE_Y+y)*RIVER_WIDTH+84);
         }
-        xram0_poke16(XRAM_DEMO_FOOTER_CONFIG+4,-256); footer_offset=0;
         if (hud_pending) hud_pending=3;
         return;
     }
@@ -1473,10 +1467,6 @@ static void hud_layout(void)
     hud_sprites[0].palette=XRAM_HUD_BLACK_PALETTE;
     hud_sprites[1].x=(HUD_BRIDGE_NUMBER_X-8)*2;
     hud_sprites[2].x=HUD_BRIDGE_NUMBER_X*2; hud_sprites[2].y=HUD_TOP+HUD_GAME_Y;
-    /* Preserve the logo bitmap while positioning it in the reference layout. */
-    hud_sprites[18].x=48; hud_sprites[18].y=HUD_FOOTER_Y;
-    hud_sprites[18].image=XRAM_LOGO_IMAGE; hud_sprites[18].palette=XRAM_LOGO_PALETTE;
-    hud_sprites[18].size=0x1e;
     hud_dirty=7;
     if (hud_pending) {hud_pending=2; return;}
     }
@@ -1524,6 +1514,7 @@ static void duo_hud(void)
     hud_sprites[15].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)/10)*32;
     hud_sprites[15].y=G(0xbd)>=10 ? HUD_TOP+DUO_STAGE_Y : -256;
     hud_sprites[16].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)%10)*32;
+    demo_footer_tick();
     upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites)); hud_dirty=0;
 }
 /* The manual ends at $F0FF. Preserve each terrain row's base color and
@@ -1605,12 +1596,12 @@ static uint8_t configure_video(uint8_t restoring)
         upload(XRAM_RESERVE_IMAGE+y*4,row,4);
     }
     for (y=0;y<8;++y) {
-        memset(row,0,30);
-        for (x=0;x<60;++x) {
+        memset(row,0,32);
+        for (x=0;x<sizeof(activision_logo[0])-1;++x) {
             uint8_t pixel=activision_logo[y][x];
             if (pixel!='.') row[x>>1]|=(pixel-'A'+1)<<((x&1) ? 0 : 4);
         }
-        upload(XRAM_LOGO_IMAGE+y*30,row,30);
+        upload(XRAM_LOGO_IMAGE+y*32,row,32);
     }
     for (y=0;y<HUD_FUEL_HEIGHT;++y) for (x=0;x<HUD_FUEL_WIDTH;++x)
         fuel_rows[y][x]=fuel_gauge[y][x]=='X' ? 0x77 : 0xaa;
@@ -1655,7 +1646,7 @@ static uint8_t configure_video(uint8_t restoring)
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),PLAYER_SPRITE-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_SPRITES+PLAYER_SPRITE*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
-        xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,240)<0 ||
         xreg(1,0,1,5,0x38,XRAM_DUO_LIFE_SPRITES,DUO_LIFE_SPRITE_COUNT,2,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_DEMO_FOOTER_CONFIG,1,HUD_FOOTER_Y,HUD_FOOTER_Y+8)<0 ||
@@ -1684,6 +1675,7 @@ int main(int argc,char** argv)
         delta=now-last_vsync; if (delta>1) skipped_frames+=delta-1;
         last_vsync=now;
         present_frame();
+        sound_status_tick();
 #ifdef RIVER_PROFILE
         timing_start=timing_stamp=(uint16_t)ria_attr_get(RIA_ATTR_CLK_RUN_MS);
 #endif
@@ -1714,7 +1706,10 @@ int main(int argc,char** argv)
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
         }
         if (changes&32) audio_muted^=1;
-        if ((changes&64) && !audio_next()) return 1;
+        if ((changes&64) && !audio_muted) {
+            if (!audio_next()) return 1;
+            sound_status_notify();
+        }
         if (changes&96) sound_status_update();
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;

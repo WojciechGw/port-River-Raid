@@ -2,7 +2,7 @@
 from emulator_checks import poke
 
 
-def run_audio_switch_checks(case,sym,fixture,resume,start):
+def run_audio_switch_checks(case,sym,fixture,resume,start,output):
     backend=f'peek 0x{sym["audio_backend"]:04x}'
     muted=f'peek 0x{sym["audio_muted"]:04x}'
     enabled=f'peek 0x{sym["pcm_enabled"]:04x}'
@@ -37,12 +37,38 @@ def run_audio_switch_checks(case,sym,fixture,resume,start):
         else:
             setup=fixture+resume+['press down']
         commands=setup+['press f9','run 3','release f9','run 3',muted+' 1']
-        for current in (3,1,2,3,1,2):
-            commands+=tap+[backend+f' {current}',muted+' 1',amplitudes]
+        for _ in range(6):
+            commands+=tap+[backend+' 2',muted+' 1',amplitudes,
+                            'peek xram:0x02c8 32 32 32 32']
         commands+=['press f9','run 3','release f9','run 3',muted+' 0',amplitudes,
                    'release down s','peek xram:0x008b 0']
         _,data=case(f'f10-live-muted-{"duo" if duo else "solo"}',commands)
         assert all(not any(a) for a in data[:-1]) and any(data[-1])
+
+    # The five-second notice also expires while the game is paused.
+    for option,current,label in (('psg',2,b'OPL '),('opl2',3,b'PCM '),('pcm',1,b'PSG ')):
+        _,data=case(f'f10-notice-five-seconds-{option}',fixture+tap+[
+            backend+f' {current}', 'dump xram:0x0220 30', 'dump xram:0x02c8 4',
+            f'shot "{(output / f"f10-notice-{option}.png").as_posix()}"',
+            'run 290','dump xram:0x02c8 4','run 10','dump xram:0x02c8 4',
+            'peek xram:0x0232 56 1'],
+            rom_args=('/'+option,))
+        assert int.from_bytes(data[0][2:4],'little')==296
+        assert int.from_bytes(data[0][6:8],'little')==3
+        assert int.from_bytes(data[0][18:20],'little')==280
+        assert int.from_bytes(data[0][4:6],'little')==232
+        assert data[1:]==[label,label,b'    ']
+
+    _,data=case('f10-notice-refresh',fixture+tap+['run 250']+tap+[
+        backend+' 1','run 50','dump xram:0x02c8 4','run 240',
+        'dump xram:0x02c8 4','run 10','dump xram:0x02c8 4'])
+    assert data==[b'PSG ',b'PSG ',b'    ']
+    _,data=case('f10-hold-does-not-refresh',fixture+[
+        'press f10','run 3',backend+' 3','dump xram:0x02c8 4',
+        'run 310',backend+' 3','dump xram:0x02c8 4',
+        'release f10','run 3','press f10','run 3',backend+' 1',
+        'release f10','run 3','dump xram:0x02c8 4'])
+    assert data==[b'PCM ',b'    ',b'PSG ']
 
     # This emulator always supports PCM. Simulate the capability probe's
     # negative return, without changing production code or CLI options.

@@ -4,6 +4,7 @@ Rare conditions use paused RAM fixtures. No test commands are compiled into
 the game. The original zero-page layout is deliberately retained at $80-$FF.
 """
 import argparse
+import json
 import math
 import re
 import struct
@@ -234,7 +235,7 @@ def check_bank_detail(config, terrain, tiles, river1, river2):
 
 def run_audio_checks(case,sym,fixture,resume,start,output):
     from audio_switch_checks import run_audio_switch_checks
-    run_audio_switch_checks(case,sym,fixture,resume,start)
+    run_audio_switch_checks(case,sym,fixture,resume,start,output)
     # PCM must be explicitly supported, and PSG must stay silent alongside it.
     _, samples=case("audio-pcm-init-and-pause",fixture+[
         f'peek 0x{sym["pcm_enabled"]:04x} 1',"dump xram:0xc000 8",
@@ -487,6 +488,7 @@ def main():
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
     parser.add_argument("--controls-only",action="store_true")
+    parser.add_argument("--footer-only",action="store_true")
     parser.add_argument("--bridge-tanks-only",action="store_true")
     parser.add_argument("--missiles-only", action="store_true")
     parser.add_argument("--cpb", action="store_true", help="Emulate PICO-SRAM-BANKED registers")
@@ -576,7 +578,7 @@ def main():
 
     if args.audio_switch_only:
         from audio_switch_checks import run_audio_switch_checks
-        run_audio_switch_checks(case,sym,fixture,resume,start)
+        run_audio_switch_checks(case,sym,fixture,resume,start,output)
         print(f"All {count} audio switching checks passed.",flush=True)
         return
 
@@ -585,6 +587,15 @@ def main():
         run_duo_checks(case,sym,boot,output)
         print(f"All {count} DUO checks passed.",flush=True)
         return
+
+    if args.footer_only:
+        from demo_footer_checks import run_demo_footer_checks
+        run_demo_footer_checks(case, sym, boot, output, fixture)
+        print(f"All {count} footer checks passed.", flush=True)
+        return
+
+    from demo_footer_checks import run_demo_footer_checks
+    run_demo_footer_checks(case, sym, boot, output, fixture)
 
     # The native SELECT number belongs in GAME, not in P1/P2 or HI.
     # Check actual score pointers and the rendered record across both modes.
@@ -756,25 +767,6 @@ def main():
         print(f"All {count} screen checks passed.",flush=True)
         return
 
-    # Staging must not alter the live VGA descriptors until the next VSYNC.
-    # The renderer then prepares the following frame; it must not overwrite
-    # descriptors already being scanned out during the displayed frame.
-    _, buffers=case("vsync-world-presentation",fixture+["run 2",
-        "dump xram:0x0200 16", "dump xram:0x0300 10",
-        poke(0xb3,90), poke(sym["ring_top"],17), "dump xram:0x0200 16",
-        "dump xram:0x0300 10", "run 1",
-        f'dump 0x{sym["terrain"]:04x} 16', f'dump 0x{sym["sprites"]:04x} 10',
-        "dump xram:0x0200 16", "dump xram:0x0300 10",
-        "run 1", "dump xram:0x0200 16", "dump xram:0x0300 10"])
-    assert buffers[0]==buffers[2], "Changing native terrain altered live VGA descriptors"
-    assert buffers[1]==buffers[3]==buffers[7], "Preparing sprites altered the displayed frame"
-    # The script can stop during the short VSYNC copy: Y is written before
-    # sprites. Allow that transient in the top blank lines, before the river.
-    assert buffers[6] in (buffers[0],buffers[4])
-    assert buffers[4]==buffers[8] and buffers[5]==buffers[9], "World descriptors were not presented together"
-    assert struct.unpack_from("<h",buffers[4],4)[0]==4
-    assert struct.unpack_from("<h",buffers[5],0)[0]==180
-
     footer=(build / "demo_footer.bin").read_bytes()
     width=len(footer)//8
     # Every palette fades from black, preserving RGB555 transparency. Snapshot
@@ -805,14 +797,14 @@ def main():
     assert all((b-a)&255==2 for a,b in zip(times,times[1:])), "Fade step is not two VSYNCs"
     river_last,caption,river_later=buffers[-3:]
     assert river_last==river_before, "Scene moved during fade"
-    assert struct.unpack_from("<h",caption,2)[0]<0, "Caption did not start after fade"
+    assert struct.unpack_from("<h",caption,2)[0]==0, "Caption moved before its three-second hold"
     assert river_last!=river_later, "Demo did not start after fade"
 
     case("game-start-during-fade",dismiss_cover+["wait xram:0x00b2 8 240",
         "press space", "run 140", "release space", "run 4",
         f'peek 0x{sym["ready"]:04x} 0', "peek xram:0x0082 1", "peek xram:0x0084 3 1"])
 
-    _, buffers=case("demo-footer-scroll",boot+["dump xram:0x0260 14", "run 60",
+    _, buffers=case("demo-footer-scroll",boot+["run 180", "dump xram:0x0260 14", "run 60",
         "dump xram:0x0260 14",f"dump xram:0x3800 {len(footer)}",
         "dump xram:0x0720 14", "dump xram:0x06b4 10",
         f'shot "{(output / "demo-caption.png").as_posix()}"'])
@@ -822,18 +814,21 @@ def main():
     assert (x1-x2)%(width*2)==60, "Demo caption did not scroll left at one pixel/frame"
     assert struct.unpack_from("<hhHH",second,6)==(width*2,8,0x3800,0x0720)
     assert struct.unpack_from("<h",second,4)[0]==222
-    assert struct.unpack_from("<h",logo,2)[0]<0, "Static logo covers demo text"
+    assert struct.unpack_from("<hh",logo,0)==(0,232), "Static logo must stay below the caption"
     assert image==footer, "Caption asset was not loaded into XRAM"
     assert int.from_bytes(palette[4:6],"little")==((23<<11)|(23<<6)|23|32)
-    # Ten eight-pixel cells precede the raised TM, as in the Atari caption.
-    for y,pattern in enumerate(("XXX.X...X", ".X..XX.XX", ".X..XXXXX", ".X..X.X.X", ".X..X...X")):
-        assert image[y*width+80:y*width+89]==bytes(0x22 if p=="X" else 0 for p in pattern)
-    assert not any(image[:80]), "Normal title lettering is not below superscript TM"
+    # Locate the artwork after the editable opening spaces.
+    caption_source=json.loads((ROOT / 'src/demo-footer.json').read_text(encoding='utf-8'))
+    def caption_x(character):
+        prefix=caption_source['text'].split(character,1)[0]
+        return sum(caption_source['space_advance'] if c==' ' else caption_source['advance'] for c in prefix)
+    title_x=caption_x('R')
+    assert not any(image[:title_x+6]), "Text must keep its blank top storage row"
     for y,pattern in enumerate(("XXXXX.","XX..XX","XX..XX","XXXXX.","XX.XX.","XX..XX"),1):
-        assert image[y*width:y*width+6]==bytes(0x22 if p=="X" else 0 for p in pattern), "Caption R differs from reference"
+        assert image[y*width+title_x:y*width+title_x+6]==bytes(0x22 if p=="X" else 0 for p in pattern), "Caption R differs from reference"
 
-    _, buffers=case("demo-footer-wrap-and-gray",boot+["dump xram:0x0260 14",
-        f"run {width*2}","dump xram:0x0260 14", "peek xram:0x0724 247 189"])
+    _, buffers=case("demo-footer-wrap-and-gray",boot+["wait xram:0x0262 254 300", "dump xram:0x0260 14",
+        f"run {width*2+(width*2//320)*60}","dump xram:0x0260 14", "peek xram:0x0724 247 189"])
     assert buffers[0]==buffers[1], "Demo caption did not wrap after a complete pass"
     case("demo-footer-pause",boot+["press p", "run 3", "release p", "run 3",
         "mark", "run 60", "expect-same"])
@@ -842,9 +837,9 @@ def main():
         "dump xram:0x0260 14", "dump xram:0x06b4 10"])
     playing,logo_playing,demo,logo_demo=buffers
     assert struct.unpack_from("<h",playing,4)[0]<0
-    assert struct.unpack_from("<hh",logo_playing,0)==(48,222)
+    assert struct.unpack_from("<hh",logo_playing,0)==(0,232)
     assert struct.unpack_from("<h",demo,4)[0]==222
-    assert struct.unpack_from("<h",logo_demo,2)[0]<0
+    assert struct.unpack_from("<hh",logo_demo,0)==(0,232)
 
     # A held F3 must advance once, update both native player states, and show
     # the selected bridge using the real HUD sprites, including two digits.

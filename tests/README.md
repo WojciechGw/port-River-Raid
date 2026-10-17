@@ -51,7 +51,9 @@ zawijanie bufora oraz publikowanie tylko kompletnych stron.
 interpolacji miksera i toru audio fizycznego komputera.
 Opcja `--audio-only` uruchamia wyłącznie scenariusze dźwięku.
 Testy `f10-*` obejmują cykl PSG/OPL2/PCM, przytrzymanie klawisza,
-pauzę, F9, powrót z F1 oraz przełączanie podczas lotu solo i DUO.
+pauzę, blokadę podczas wyciszenia F9, powrót z F1 oraz przełączanie podczas
+lotu solo i DUO. Sprawdzają napis PSG/OPL/PCM pod scrollerem przez 5 sekund,
+odnowienie czasu kolejnym F10 i brak odnawiania przy przytrzymaniu klawisza.
 Ponieważ emulator obsługuje PCM, brak tego interfejsu jest sprawdzany przez
 symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
 Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.
@@ -108,8 +110,10 @@ Obejmują przytrzymane F1, ponowne otwarcie, zachowanie pauzy oraz backendy audi
 Testy `f9-mute-*` sprawdzają wyciszenie i przywrócenie dźwięku we wszystkich
 trybach gry i backendach, przytrzymanie klawisza oraz zachowanie ustawienia
 po F1, restarcie i zmianie trybu.
-Testy `sound-status-*` sprawdzają położenie (0,0), czcionkę 8×8, białą paletę,
-ikony nutki i przekreślonej nutki, odstęp jednej kolumny tekstowej,
+Testy `sound-status-*` sprawdzają położenie nutki (312,232) pod scrollerem,
+etykietę generatora (296,232) wyrównaną do prawej krawędzi, przesunięcie
+nutki w lewo podczas wyświetlania etykiety, czcionkę 8×8, białą paletę,
+ikony nutki i przekreślonej nutki,
 wszystkie generatory i powrót z F1 w każdym trybie gry.
 Obejmują pełny pasek z `/v` (także `/V`) oraz domyślny widok, w którym
 pojawia się wyłącznie przekreślona nutka po wyciszeniu dźwięku.
@@ -123,12 +127,20 @@ zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 
 `maximum-level-wrap` sprawdza powrót 50 → 49 przy nowym limicie.
 Scenariusze `demo-footer-*` sprawdzają ruch napisu o piksel na klatkę,
 zawijanie po całym przebiegu, jasnoszarą paletę także po aktywacji wygaszacza,
-podniesione i mniejsze TM, zatrzymanie przy pauzie oraz przejście między
-przewijanym napisem w pokazie i nieruchomym logo podczas gry.
+jednakowe komórki znaków, zatrzymanie przy pauzie oraz przejście między
+napisem w pokazie i jego ukryciem podczas gry. Stałe logo Activision pozostaje
+w lewym dolnym rogu (0,232) w obu stanach i we wszystkich trzech trybach;
+testy porównują pełną bitmapę 64×8, w tym jej prawą krawędź.
+`python tests/emulator_checks.py --footer-only` sprawdza scroller w trzech
+trybach, znaki 6×7 z odstępem 2 pikseli, logo dopełnione do 64 pikseli,
+szerokość 960 pikseli logicznych, trzysekundowy postój, sekundowe postoje co 320 pikseli (także po
+zawinięciu), zgodność tekstu GAME 3 z GAME 1/2, pauzę, odtworzenie
+po F1, publikację obrazu przy VSYNC i powrót do GAME 1.
 Scenariusz `game-fade-all-palettes` sprawdza rozjaśnianie całego ekranu po
 okładce: wszystkie 288 kolorów, zachowanie przezroczystości, 32 kroki co dwa
 VSYNC-i oraz dokładne przywrócenie palet. Potwierdza nieruchomą scenę podczas
-przejścia i wspólny start napisu oraz rzeki zaraz po nim. Zrzuty
+przejścia, start rzeki zaraz po nim oraz nieruchomy napis podczas początkowego
+postoju. Zrzuty
 `game-fade-black.png`, `game-fade-16.png` i `game-fade-32.png` pokazują przebieg.
 `game-start-during-fade` sprawdza start gry klawiszem przytrzymanym w trakcie przejścia.
 Scenariusz `fuel-lettering` odczytuje przesłaną do XRAM bitmapę zbiornika
