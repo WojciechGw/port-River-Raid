@@ -30,6 +30,21 @@ wszystkie poziomy palety fade in/out oraz zachowanie okładki podczas
 oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
 i napisu oraz brak automatycznego wczytywania okładki do XRAM.
 `python tests/emulator_checks.py --screens-only` uruchamia testy plansz.
+Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test odczytuje
+rejestry OPL2 przez pełny utwór i początek następnej pętli, porównując każdą
+klatkę z partyturą. Sprawdza wyłączenie muzyki po okładce, ciszę w instrukcji,
+uruchomienie rozgrywki z każdym backendem i zachowanie obrazu po F1.
+Odtwarzacz zajmuje tymczasowo 512 bajtów `reset_tiles`; dane utworu są w
+XRAM `$F100`, a rejestry OPL2 w `$0100`. Ładowanie instrukcji przez F1
+nie może nadpisać kopii obrazu gry w `$F100..$F8FF`.
+
+Modelowy odsłuch całego intro (z zachowaniem ponownych wyzwoleń tej samej nuty):
+`python tools/preview_intro.py build/cc65/release/intro-score.bin --opl-library
+build/opl-engine-preview/opl-preview.dll --output build/intro.wav`.
+Bibliotekę tworzy się z `tools/opl_preview.c` i rdzenia emu8950 firmware.
+Partytura JSON zawiera klatkę początku, długość, numer nuty MIDI i poziom TL;
+`tools/make_intro.py` kompiluje ją bez dodatkowych pakietów Pythona.
+
 `manual-fades-and-wait` sprawdza obraz z `assets/manual.bmp`, wszystkie poziomy
 fade in/out, napis PRESS ANY KEY TO START THE GAME oraz oczekiwanie na osobny
 klawisz. `manual-key-*` sprawdzają różne klawisze i ich zużycie przed ekranem

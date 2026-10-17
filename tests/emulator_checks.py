@@ -531,6 +531,7 @@ def main():
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
+    parser.add_argument("--intro-only",action="store_true")
     parser.add_argument("--audio-switch-only",action="store_true")
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
@@ -600,6 +601,12 @@ def main():
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
 
+    if args.intro_only:
+        from intro_checks import run_intro_checks
+        run_intro_checks(case, sym, boot, output, build, dict(load_image.assets))
+        print(f"All {count} intro checks passed.", flush=True)
+        return
+
     if args.missiles_only:
         from missile_checks import run_missile_checks
         run_missile_checks(case, sym, boot, fixture, resume)
@@ -641,6 +648,8 @@ def main():
         print(f"All {count} footer checks passed.", flush=True)
         return
 
+    from intro_checks import run_intro_checks
+    run_intro_checks(case, sym, boot, output, build, dict(load_image.assets))
     from demo_footer_checks import run_demo_footer_checks
     run_demo_footer_checks(case, sym, boot, output, fixture)
 

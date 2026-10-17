@@ -5,6 +5,8 @@
 .macpack longbranch
 .importzp ptr1
 .export _show_cover, _show_outro, _show_manual
+.import _reset_tiles, intro_init, intro_tick, intro_stop, __INTRO_SCORE_SIZE__
+.export boot_scene
 .segment "SPLASH"
 
 COVER_CONFIG  = $0280
@@ -67,6 +69,27 @@ boot_show:
     lda #1
     sta RIA_STEP0
     sta RIA_STEP1
+    ; Shared screen helpers and the music player borrow terrain scratch RAM.
+    ; Staging is safe even on F1: never touch the saved video above $F100.
+    boot_open_file intro_path
+    boot_read COVER_STAGING, 512
+    boot_address RIA_ADDR0, COVER_STAGING
+    ldy #0
+@overlay:
+    lda RIA_RW0
+    sta _reset_tiles,y
+    iny
+    bne @overlay
+@overlay_hi:
+    lda RIA_RW0
+    sta _reset_tiles+256,y
+    iny
+    bne @overlay_hi
+    lda boot_scene
+    bne @no_score
+    boot_read $F100, __INTRO_SCORE_SIZE__
+@no_score:
+    jsr boot_close
     ; State data must not look like an initialized game while the cover is up.
     boot_address RIA_ADDR0, $0080
     lda #0
@@ -153,6 +176,7 @@ boot_show:
     jmi boot_error
     xreg 1,0,1,3,0,COVER_PROMPT_CONFIG,1
     jmi boot_error
+    jsr intro_init
     lda #1
     jsr boot_state
     ; Level zero has already been loaded. Every subsequent palette is read
@@ -222,6 +246,7 @@ boot_show:
     bpl @fade_out
     lda #4
     jsr boot_state
+    jsr intro_stop
     lda boot_scene
     cmp #1
     bne @release_key
@@ -264,6 +289,7 @@ boot_prepare_palette:
     boot_read COVER_STAGING, 512
     rts
 
+.segment "INTRO"
 boot_copy_palette:
     boot_address RIA_ADDR0, COVER_PALETTE
     boot_address RIA_ADDR1, COVER_STAGING
@@ -277,13 +303,16 @@ boot_copy_palette:
     bne @copy
     rts
 
+.segment "SPLASH"
 boot_vsync:
+    jsr intro_tick
     lda RIA_VSYNC
 @wait:
     cmp RIA_VSYNC
     beq @wait
     rts
 
+.segment "INTRO"
 boot_any_key:
     boot_address RIA_ADDR0, 0
     lda RIA_RW0
@@ -316,6 +345,7 @@ boot_prompt:
     sta RIA_RW0
     rts
 
+.segment "SPLASH"
 boot_state:
     tax
     boot_address RIA_ADDR0, COVER_STATE
@@ -386,6 +416,7 @@ boot_error:
     bmi @closed
     jsr boot_close
 @closed:
+    xreg 0,1,1,$ffff
     xreg 0,0,0,$ffff
     xreg 1,0,0,0
     lda #1
@@ -407,6 +438,8 @@ cover_path:  .asciiz "ROM:cover.bin"
 fade_path:   .asciiz "ROM:cover-fade.bin"
 prompt_path: .asciiz "ROM:cover-prompt.bin"
 footer_path: .asciiz "ROM:demo-footer.bin"
+.segment "SPLASH"
+intro_path: .asciiz "ROM:intro.bin"
 .segment "DATA"
 boot_fd:     .word $ffff
 boot_level:  .byte 0

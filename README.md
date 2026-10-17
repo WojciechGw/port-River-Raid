@@ -45,6 +45,13 @@ pitch, and explosions have a low body rather than metallic percussion.
 Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
+The startup cover plays a 32-second, nine-voice OPL2 arrangement of the supplied
+`RiverRaid2.wav`, repeating while the cover is visible. It stops when the cover
+finishes fading out; the manual remains silent. The intro uses OPL2 regardless
+of the gameplay audio option, then restores the selected PSG/OPL2/PCM backend.
+The editable notes are in `src/intro-score.json`; the WAV is not embedded in
+the game. FM instruments approximate the recording's timbres.
+
 GAME 3 DUO lets P1 and P2 fly together, with separate scores, fuel and lives.
 Each pilot can hold up to ten lives, shown as two rows of five plane icons
 beside their fuel gauge.

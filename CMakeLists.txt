@@ -16,6 +16,12 @@ else()
     endif()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
+    set(RIVER_INTRO_SCORE ${CMAKE_CURRENT_BINARY_DIR}/intro-score.bin)
+    add_custom_command(OUTPUT ${RIVER_INTRO_SCORE}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_intro.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/intro-score.json ${RIVER_INTRO_SCORE}
+        DEPENDS src/intro-score.json tools/make_intro.py
+        VERBATIM)
     set(RIVER_MOUNTAINS ${CMAKE_CURRENT_BINARY_DIR}/mountains.h)
     set(RIVER_SOUND_ICONS ${CMAKE_CURRENT_BINARY_DIR}/sound_icons.h)
     add_custom_command(OUTPUT ${RIVER_SOUND_ICONS}
@@ -68,7 +74,8 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/duo.asm src/cover.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm src/demo_footer.asm ${RIVER_CORE}
+        src/riverraid.asm src/duo.asm src/cover.asm src/intro.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm src/demo_footer.asm ${RIVER_CORE}
+        ${RIVER_INTRO_SCORE}
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
@@ -83,6 +90,8 @@ else()
     endif()
     rp6502_map(riverraid src/xram.h "XRAM_.*")
     rp6502_asset(riverraid help src/help.txt)
+    rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
+    rp6502_asset(riverraid intro.bin ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
     # Named assets are read from ROM: on demand; they are not preloaded to XRAM.
     rp6502_asset(riverraid cover.bin ${RIVER_COVER_IMAGE})
     rp6502_asset(riverraid cover-fade.bin ${RIVER_COVER_FADES})

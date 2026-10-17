@@ -37,6 +37,11 @@ typedef struct {
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
  * pixels before game initialization and after audio stops on exit. */
 #define XRAM_COVER_STATE 0x00B0
+/* Only on the startup cover: OPL register page at $0100, score at $F100.
+ * Both are released before the manual/game uses these regions. The player
+ * and shared screen helpers temporarily occupy reset_tiles in CPU RAM. */
+#define XRAM_INTRO_OPL 0x0100
+#define XRAM_INTRO_SCORE 0xF100
 /* Scene: 0 cover, 1 outro, 2 manual. */
 #define XRAM_COVER_SCENE 0x00B4
 /* F1 return data, above the last manual pixel ($F0FF). */
