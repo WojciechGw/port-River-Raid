@@ -30,8 +30,8 @@ static uint16_t synth_shot_step;
 static uint8_t synth_shot_volume;
 static const uint8_t engine_volume[4]={4,4,7,5};
 /* VIA sample clock, about 1000..3000 Hz. Runtime scales for PHI2. */
-static uint16_t engine_period[16];
-static const uint16_t engine_divider[16]={256,226,202,183,167,154,142,132,124,116,110,104,98,94,89,85};
+/* Slow period and the span towards the fast period, interpolated in engine.asm. */
+uint16_t engine_period[2];
 uint16_t engine_latch;
 uint8_t engine_active,engine_level;
 static const uint8_t opl_slot[9]={0,1,2,8,9,10,16,17,18};
@@ -85,9 +85,9 @@ static uint8_t noise8(void)
 }
 static uint16_t engine_pitch(uint8_t band)
 {
-    /* Separate, overlapping bands keep the noise spectrum steady. Deep 3:1
-     * FM fills the spectrum; opl_voice lowers the engine by one octave.
-     * Use the full speed accumulator for a smooth, almost 3:1 throttle range.
+    /* Keep four independent phase clocks and the full speed accumulator.
+     * Strong feedback supplies broadband noise, rather than audible FM notes.
+     * Keep the RNG calls unchanged: blast voices share this sequence.
      * Max product is 44*255, within cc65's 16-bit arithmetic. */
     uint16_t hz=8+band*7+(noise8()>>4);
     return hz+((hz*G(0xb5))>>7);
@@ -100,13 +100,14 @@ static uint16_t tone_hz(uint16_t step)
 static void opl_instruments(void)
 {
     static const uint8_t modulator[9]={0x23,0x23,0x23,0x23,0x22,0x22,0x22,0x23,0x23};
-    static const uint8_t depth[9]={6,6,6,6,16,16,16,63,63};
-    static const uint8_t connection[9]={0,0,0,0,8,8,8,1,1};
+    static const uint8_t depth[9]={1,1,1,1,16,16,16,63,63};
+    static const uint8_t connection[9]={14,14,14,14,8,8,8,1,1};
     uint8_t n,s,carrier;
     for (n=0;n<9;++n) {
         s=opl_slot[n]; carrier=s+3;
-        /* Engine: deeper FM at a lower clock packs the sidebands more closely.
-         * Zero feedback removes the rough, buzzy feedback harmonics.
+        /* Engine: maximum feedback with almost full modulator amplitude
+         * breaks up periodic FM into continuous broadband noise. TL=1 keeps
+         * residual carrier energy low; AM/vibrato and percussion stay off.
          * Blast: retain the 2:1 feedback patch and its low body.
          * Tones: additive fundamental plus third harmonic (square-wave body),
          * instead of the former half-sine FM whistle. */
@@ -153,15 +154,17 @@ uint8_t audio_init(void)
     }
     {
         uint8_t n;
-        uint16_t clock=(uint16_t)ria_attr_get(RIA_ATTR_PHI2_KHZ)>>5;
+        uint16_t clock=(uint16_t)ria_attr_get(RIA_ATTR_PHI2_KHZ);
         memset(psg,0,sizeof(psg));
-        /* Q8 periods avoid linking a 32-bit divider for startup alone. */
-        for (n=0;n<16;++n) engine_period[n]=((clock*engine_divider[n])>>3)-2;
+        engine_period[0]=clock-2;
+        engine_period[1]=clock-clock/3;
         /* Opposite stationary waves act as signed level outputs. A timer
          * clocks polynomial noise into their volume registers; no PCM API. */
         for (n=4;n<8;++n) {
             psg[n].duty=255; psg[n].release_wave=(n&1) ? 0x30 : 0x10;
-            psg[n].attack=psg[n].decay=0xf0;
+            /* Fixed attack ceiling: the IRQ changes only sustain (decay).
+             * All engine levels are <= gain 7, including full throttle. */
+            psg[n].attack=0x70; psg[n].decay=0xf0;
         }
         xram0_write(XRAM_PSG,psg,sizeof(psg));
         if (xreg(0,1,0,XRAM_PSG)<0) return 0;
@@ -218,7 +221,7 @@ static void psg_update(uint8_t flight,uint8_t native_engine)
     }
     engine_level=attenuation[engine_volume[G(0x84)&3]]+5+mix;
     if (engine_level>14) engine_level=14;
-    engine_active=flight; engine_latch=engine_period[G(0xb5)>>4];
+    engine_active=flight;
     xram0_write(XRAM_PSG,psg,32);
     psg_engine_apply();
 }

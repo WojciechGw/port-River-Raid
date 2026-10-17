@@ -36,7 +36,9 @@ Tank rounds can also destroy FUEL depots, without awarding player points.
 The panel shows the score, fuel,
 player, game variation, bridge number, session high score (HI), and reserve
 planes. Audio offers PSG, OPL2 and PCM backends, guided by an Atari XL/XE
-recording. Speed and throttle change the engine's noise bandwidth and volume;
+recording. Speed and throttle control the engine sound. PSG and PCM change
+its noise bandwidth; OPL2 uses continuous broadband feedback noise with
+throttle-controlled volume to avoid pitched FM hum and beating.
 PSG uses eight oscillators and OPL2 nine channels to keep the engine playing
 alongside shots, blasts and fuel tones. Missiles descend in
 pitch, and explosions have a low body rather than metallic percussion.
@@ -182,7 +184,7 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 
 - `src/main.c`: RIA/VGA configuration, raster rendering, input, and collisions.
 - `src/audio.c`: command-line audio selection, PSG layers and OPL2 FM patches.
-- `src/engine.asm`: timer-clocked binary noise for the PSG engine, independent of PCM.
+- `src/engine.asm`: timer-clocked noise with linear amplitude quantization for the PSG engine, independent of PCM.
 - `src/audio.asm`: clocked noise, tones and streaming PCM ring producer.
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.

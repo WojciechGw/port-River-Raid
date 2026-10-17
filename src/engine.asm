@@ -1,4 +1,4 @@
-; PSG engine only. Timer 1 clocks signed polynomial noise into four stationary
+; PSG engine only. Timer 1 clocks signed multi-level noise into four stationary
 ; PSG waves, two for each sign. The previous sample supplies a two-tap average.
 ; This controls the actual noise clock instead of gating audio-rate white noise.
 .include "rp6502.inc"
@@ -7,6 +7,8 @@ VIA_ACR = VIA_CR
 .export _engine_ticks, _engine_rng
 .export _engine_frame
 .import _engine_active, _engine_level, _engine_latch
+.import _engine_period
+.importzp tmp1
 .segment "BSS"
 old_irq: .res 2
 old_flags: .res 1
@@ -15,12 +17,24 @@ old_ier: .res 1
 old_latch: .res 2
 running: .res 1
 previous: .res 1
-current: .res 1
-positive: .res 2
-negative: .res 2
+positive: .res 16
+negative: .res 16
+last_level: .res 1
 _engine_ticks: .res 2
 _engine_rng: .res 2
 _engine_frame: .res 4
+.segment "RODATA"
+; Nearest PSG gains to eight LINEAR amplitudes, from peak to zero. Each row
+; is for engine_level 9..14. Adding attenuation indices instead would turn
+; most low-volume samples into zero, making the noise sparse and crackly.
+; Values are ready to write to sustain; attack is a fixed ceiling of $70.
+_engine_noise_levels:
+    .byte $70,$80,$90,$a0,$b0,$c0,$e0,$f0
+    .byte $80,$90,$a0,$b0,$c0,$d0,$e0,$f0
+    .byte $90,$a0,$a0,$b0,$c0,$d0,$e0,$f0
+    .byte $a0,$b0,$b0,$c0,$d0,$d0,$e0,$f0
+    .byte $b0,$b0,$c0,$d0,$d0,$e0,$e0,$f0
+    .byte $c0,$c0,$d0,$d0,$e0,$e0,$f0,$f0
 .segment "CODE"
 _psg_engine_init:
     php
@@ -51,14 +65,48 @@ _psg_engine_init:
     sta $ffff
     lda #$02
     sta _engine_rng
+    sta previous
     lda #$65
     sta _engine_rng+1
     lda #0
     sta running                ; Re-entering PSG must restart Timer 1.
+    sta _engine_ticks
+    sta _engine_ticks+1
+    lda #$ff
+    sta last_level
     cli
     rts
 
 _psg_engine_apply:
+    ; Interpolate slow/fast periods with all eight speed bits. Keep this
+    ; outside SEI; the IRQ uses neither the scratch bytes nor engine_latch.
+    lda $b5
+    sta tmp1
+    stz _engine_latch
+    stz _engine_latch+1
+    ldy #8
+@fraction:
+    lsr tmp1
+    bcc @divide
+    clc
+    lda _engine_latch
+    adc _engine_period+2
+    sta _engine_latch
+    lda _engine_latch+1
+    adc _engine_period+3
+    sta _engine_latch+1
+@divide:
+    ror _engine_latch+1
+    ror _engine_latch
+    dey
+    bne @fraction
+    sec
+    lda _engine_period
+    sbc _engine_latch
+    sta _engine_latch
+    lda _engine_period+1
+    sbc _engine_latch+1
+    sta _engine_latch+1
     php
     sei
     lda _engine_ticks
@@ -70,15 +118,38 @@ _psg_engine_apply:
     lda _engine_rng+1
     sta _engine_frame+3
     lda _engine_level
+    cmp last_level
+    beq @levels_ready
+    sta last_level
+    sec
+    sbc #9
     asl a
     asl a
     asl a
-    asl a
-    sta positive
-    sta negative+1
+    sta tmp1
+    ldx #15
+@level:
+    txa
+    cmp #8
+    bcs @silent
+    clc
+    adc tmp1
+    tay
+    lda _engine_noise_levels,y
+    bra @store
+@silent:
     lda #$f0
-    sta positive+1
-    sta negative
+@store:
+    sta positive,x
+    pha
+    txa
+    eor #15
+    tay
+    pla
+    sta negative,y
+    dex
+    bpl @level
+@levels_ready:
     ; Volume/gates on engine channels belong to the ISR, not the C uploader.
     lda #0
     sta RIA_STEP0
@@ -148,16 +219,12 @@ _psg_engine_stop:
     plp
     rts
 
-.macro noise_pair start
-    lda #start
+.macro noise_pair address
+    lda #address
     sta RIA_ADDR0
     lda positive,x
     sta RIA_RW0
-    sta RIA_RW0
-    lda #start+8
-    sta RIA_ADDR0
     lda negative,x
-    sta RIA_RW0
     sta RIA_RW0
 .endmacro
 
@@ -189,25 +256,32 @@ engine_irq:
     pha
     lda RIA_ADDR0+1
     pha
+    ; Consume four fresh bits per sample. Reusing overlapping nibbles would
+    ; correlate neighbouring amplitudes and colour the noise.
+    ldy #4
+@random:
     lsr _engine_rng+1
     ror _engine_rng
     bcc :+
     lda _engine_rng+1
-    eor #$b4                    ; Maximal 16-bit Galois sequence, 65535 ticks.
+    eor #$b4                    ; Maximal 16-bit Galois sequence.
     sta _engine_rng+1
 :
+    dey
+    bne @random
     lda _engine_rng
-    and #1
-    sta current
+    and #15
     tax
-    lda #1
+    lda #8                     ; Adjacent writes reach the opposite sign.
     sta RIA_STEP0
+    lda #1
     sta RIA_ADDR0+1
-    noise_pair $a3              ; PSG channels 4/5: current binary sample.
-    ldx previous
-    noise_pair $b3              ; Channels 6/7: previous sample, averaging.
-    lda current
-    sta previous
+    noise_pair $a4             ; Only sustain changes; attack stays fixed.
+    ldy previous
+    stx previous
+    tya
+    tax
+    noise_pair $b4
     pla
     sta RIA_ADDR0+1
     pla

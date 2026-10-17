@@ -59,7 +59,7 @@ symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
 Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.
 Pełny zestaw wymaga PCM, natomiast scenariusze `audio-psg-*` i `audio-opl2-*`
 wybierają backend przez rzeczywiste argumenty programu. Sprawdzają wzrost
-względnej szerokości pasma silnika przy przyspieszaniu, niezależność efektów,
+częstotliwości sterujących silnikiem przy przyspieszaniu, niezależność efektów,
 wyciszenie pauzy/demo, wyjście i 1200 klatek gry przy 8 MHz dla obu syntezatorów.
 Sprawdzają także jednoczesne działanie silnika, pocisku, wybuchu i tankowania
 na wszystkich ośmiu oscylatorach PSG / dziewięciu kanałach OPL2 oraz płynne
@@ -67,7 +67,13 @@ obniżanie częstotliwości pocisku przez cały czas jego dźwięku.
 W OPL2 sprawdzają również szumowy instrument wybuchu, jego pełny czas zaniku
 oraz opadanie pasma i głośności podczas eksplozji.
 `audio-opl2-small-speed-change` odtwarza ten sam stan generatora szumu przy
-dwóch bliskich prędkościach, aby wykryć skokowe sterowanie pasmem silnika.
+dwóch bliskich prędkościach, aby wykryć skokowe sterowanie zegarami FM silnika.
+Szerokopasmowy szum OPL2 wykorzystuje maksymalne sprzężenie zwrotne i TL=1
+modulatora; jego reakcja na gaz polega głównie na zmianie głośności.
+`audio-psg-continuous-speed` sprawdza reakcję PSG na pojedyncze kroki prędkości
+w całym zakresie, stały poziom attack oraz wielopoziomowy, symetryczny sygnał
+szumu silnika. Ślady PSG kontrolują również zgodność stanu generatora
+z liczbą wykonanych przerwań.
 `audio-*-capture-engine-ramp` używa rzeczywistych klawiszy przyspieszania,
 zwalniania i ponownego przyspieszania. `audio-psg-clock-pause` sprawdza, że
 licznik próbek szumu zatrzymuje się podczas pauzy i rusza po jej wyłączeniu.
@@ -81,12 +87,19 @@ dodatkowo biblioteki z `tools/opl_preview.c` i źródła emu8950 z firmware
 (`--opl-library`); nie jest ona potrzebna do testów ROM-u ani do kompilacji gry.
 Te odsłuchy są modelami syntezatorów, a nie nagraniami fizycznego toru audio.
 Ślad PSG zawiera również spójny stan generatora szumu i licznik wykonanych
-przerwań VIA. Model odtwarza rzeczywistą sekwencję binarną, rozkładając te
-przerwania równomiernie wewnątrz klatki; nie odtwarza czasu każdego zapisu na magistrali.
+przerwań VIA. Model odtwarza rzeczywistą sekwencję wielopoziomowego szumu
+(cztery kroki LFSR na próbkę, liniowa kwantyzacja amplitudy), rozkładając
+przerwania równomiernie wewnątrz klatki; nie odtwarza czasu każdego zapisu na
+magistrali ani synchronizacji wątku audio emulatora. Starsze ślady zachowują
+odpowiedni model wcześniejszej kwantyzacji lub z próbkami binarnymi.
 Po wygenerowaniu wszystkich dwunastu próbek `tools/compare_synth.py --previews
-build/audio-v2` sprawdza pasmo silnika, jego zmianę wraz z gazem, brak dominującego
-stałego tonu, nadmiaru wysokich częstotliwości i przesterowania przy nakładaniu
-efektów. Opcjonalne `--reference ścieżka/do/RiverRaid.wav` dodaje odsłuch
+build/audio-v2` sprawdza pasmo silnika PSG, jego zmianę wraz z gazem oraz brak
+nadmiaru wysokich częstotliwości. Dla szerokopasmowego szumu OPL2 sprawdza
+silniejsze limity składowych tonalnych w długim i krótkim oknie FFT oraz
+wahania obwiedni RMS w oknach 50 ms, wykrywające dudnienie i pulsowanie.
+Sprawdza też reakcję głośności OPL2 na gaz i brak przesterowania obu
+syntezatorów przy nakładaniu efektów.
+Opcjonalne `--reference ścieżka/do/RiverRaid.wav` dodaje odsłuch
 porównawczy: oryginał XL/XE, model PSG, model OPL2, z wyrównanym poziomem RMS.
 Próbki nagrania oryginalnego pozostają poza ROM-em i plikami śledzonymi przez Git.
 `audio-engine-response` zapisuje ustawienia odczytane z ROM-u do

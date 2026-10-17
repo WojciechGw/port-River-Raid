@@ -354,13 +354,49 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
             assert all(s[n*8:n*8+2]==b'\0\0' and s[n*8+5]==(0x30 if n&1 else 0x10)
                        and s[n*8+6]&1 for s in (slow,fast) for n in range(4,8))
             assert all(not (s[n*8+6]&1) for s in (paused,demo) for n in range(8))
+            # Quantization must follow amplitude, not the logarithmic register
+            # index; otherwise quiet noise collapses into isolated impulses.
+            _,tables=case("audio-psg-linear-levels",fixture+[
+                f'dump 0x{sym["engine_noise_levels"]:04x} 48'],rom_args=("/psg",))
+            gains=(256,204,168,142,120,102,86,73,61,50,40,31,22,14,7,0)
+            for row,level in enumerate(range(9,15)):
+                peak=gains[level-2]
+                for i,register in enumerate(tables[0][row*8:row*8+8]):
+                    error=abs(gains[register>>4]*7-peak*(7-i))
+                    assert error==min(abs(g*7-peak*(7-i)) for g in gains), \
+                        "PSG noise levels do not approximate linear amplitudes"
+            commands=fixture+[poke(0xf8,[0]*4)]+resume+["press up"]
+            for speed in range(256):
+                commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),
+                    poke(0xb5,speed),"run 1","dump 0xb5 1"]+snapshot
+            _,states=case("audio-psg-continuous-speed",commands,rom_args=("/psg",))
+            periods={}
+            levels=set()
+            gains=(256,204,168,142,120,102,86,73,61,50,40,31,22,14,7,0)
+            for speed,registers,latch in zip(states[::3],states[1::3],states[2::3]):
+                periods[speed[0]]=int.from_bytes(latch,'little')
+                assert all(registers[n*8+3]==0x70 for n in range(4,8)), \
+                    "Noise IRQ changes the attack envelope"
+                for pair in (4,6):
+                    a,b=(registers[n*8+4]>>4 for n in (pair,pair+1))
+                    assert a==15 or b==15, "Noise pair drives both signs at once"
+                    levels.add(gains[a]-gains[b])
+            ordered=[periods[s] for s in sorted(periods)]
+            assert len(ordered)>=250, "Speed sweep missed the flight range"
+            assert all(a>b for a,b in zip(ordered,ordered[1:])), \
+                "PSG engine ignores small speed changes"
+            assert len(levels)>=8 and min(levels)<0<max(levels), \
+                "PSG engine still uses only binary amplitudes"
         else:
             def pitch(s,n=0):
                 return (s[0xa0+n]|((s[0xb0+n]&3)<<8))*49716*(2**((s[0xb0+n]>>2)&7))/(2**20)
             means=[sum(pitch(s,n) for n in range(4))/4 for s in (slow,fast)]
             assert 5<means[0]<80 and means[1]>means[0]*1.3, "OPL noise spectrum does not follow speed"
-            assert all(s[0xc0+n]==0 and s[0x20+slot]==0x23 and s[0x40+slot]==6
+            assert all(s[0xc0+n]==14 and s[0x20+slot]==0x23 and s[0x40+slot]==1
                        for s in (slow,fast) for n,slot in enumerate((0,1,2,8)))
+            assert all(s[0x23+slot]==0x21 and s[0xe0+slot]==s[0xe3+slot]==0
+                       for s in (slow,fast) for slot in (0,1,2,8)), \
+                "Engine enables periodic AM/vibrato or changes its sine operators"
             assert all(s[0xb0+n]&32 for s in (slow,fast) for n in range(4))
             assert all(not (s[0xb0+n]&32) for s in (paused,demo) for n in range(9))
             assert all(s[0x43+n]==63 for s in (paused,demo) for n in (0,1,2,8,9,10,16,17,18))
@@ -440,14 +476,25 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
                     # The first two snapshots straddle the idle-to-flight
                     # retune and a change in the main-loop publish position.
                     assert delta<=(75 if len(trace)<2 else 52), "Noise IRQ runs beyond its requested clock"
+                    expected_rng=previous_rng
+                    for tick in range(previous_ticks+1,previous_ticks+delta+1):
+                        for bit in range(4):
+                            expected_rng=(expected_rng>>1)^(0xb400 if expected_rng&1 else 0)
+                    assert rng==expected_rng, "Noise generator does not match the captured IRQ count"
                     trace.append(dict(label=name,seconds=1/60,psg=list(s),engine_noise=dict(
-                        start_rng=previous_rng,end_rng=rng,ticks=delta,
+                        start_rng=previous_rng,end_rng=rng,ticks=delta,start_ticks=previous_ticks,
                         clock_hz=8000000/(int.from_bytes(latch,'little')+2),
-                        active=bool(control[0]),level=control[1])))
+                        active=bool(control[0]),level=control[1],bits_per_sample=4,linear_levels=True)))
                     previous_ticks,previous_rng=ticks,rng
             else:
                 trace=[dict(label=name,seconds=1/60,opl2=list(s)) for s in buffers]
             (output/f"audio-{mode}-{name}.json").write_text(json.dumps(trace),encoding="utf-8")
+            if mode=="psg" and name=="engine-ramp":
+                for begin,end,rising in ((2,60,True),(62,120,False),(122,180,True)):
+                    clocks=[e['engine_noise']['clock_hz'] for e in trace[begin:end]]
+                    assert clocks[0]!=clocks[-1], "Engine clock does not respond to flight controls"
+                    assert all(a<=b if rising else a>=b for a,b in zip(clocks,clocks[1:])), \
+                        "Engine noise pitch moves against the plane's speed"
             if name in ("engine-slow","engine-fast"):
                 engine_statistics[name]=sum(e['engine_noise']['clock_hz'] for e in trace)/len(trace) if mode=="psg" else \
                     sum(pitch(e['opl2'],n) for e in trace for n in range(4))/(len(trace)*4)

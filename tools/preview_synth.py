@@ -12,7 +12,7 @@ import struct
 import wave
 from pathlib import Path
 from analyze_audio import FFT,haar_energy
-from preview_audio import RATE,Oscillator,render
+from preview_audio import RATE,GAINS,Oscillator,render
 
 
 def render_psg_clocked(trace):
@@ -24,27 +24,60 @@ def render_psg_clocked(trace):
     """
     oscillators=[Oscillator() for _ in range(8)]
     samples=[]
-    previous=trace[0]['engine_noise']['start_rng']&1
+    multilevel=trace[0]['engine_noise'].get('bits_per_sample',1)==4
+    linear=trace[0]['engine_noise'].get('linear_levels',False)
+    previous=trace[0]['engine_noise']['start_rng']&(15 if multilevel else 1)
+    offsets=(0,1,2,3,4,5,6,15,15,15,15,15,15,15,15,15)
     for entry in trace:
         config=entry['psg']
         for n,oscillator in enumerate(oscillators):
+            envelope=(oscillator.attack,oscillator.decay) if n>=4 and samples else None
             oscillator.configure(config[n*8:n*8+8])
+            if envelope is not None:
+                # The frame snapshot is from the end of this interval. Keep
+                # the preceding level until the next captured timer tick.
+                oscillator.attack,oscillator.decay=envelope
         noise=entry['engine_noise']
+        levels=[min(15,noise['level']-2+offset)<<4 for offset in offsets] if multilevel else None
+        if linear:
+            peak=GAINS[noise['level']-2]
+            levels=[min(range(noise['level']-2,16),
+                        key=lambda n:abs(GAINS[n]*7-peak*(7-i)))<<4 for i in range(8)]+[240]*8
         rng=noise['start_rng']
+        if not samples:
+            prior=rng
+            for _ in range(4 if multilevel else 1):
+                carry=prior>>15
+                prior=((prior^(0xb400 if carry else 0))<<1|carry)&65535
+            for pair,code in ((4,previous),(6,prior&(15 if multilevel else 1))):
+                if multilevel:
+                    values=levels[code],levels[code^15]
+                else:
+                    values=(240,noise['level']<<4) if code else (noise['level']<<4,240)
+                for n,value in zip((pair,pair+1),values):
+                    oscillators[n].decay=value
+                    if not linear:
+                        oscillators[n].attack=value
         count=round(entry['seconds']*RATE)
         accumulator=0
         for _ in range(count):
             accumulator+=noise['ticks']
             if accumulator>=count:
                 accumulator-=count
-                rng=(rng>>1)^(0xb400 if rng&1 else 0)
-                current=rng&1
+                for _ in range(4 if multilevel else 1):
+                    rng=(rng>>1)^(0xb400 if rng&1 else 0)
+                current=rng&(15 if multilevel else 1)
                 for pair,code in ((4,current),(6,previous)):
-                    level=noise['level']<<4
-                    positive,negative=(240,level) if code else (level,240)
+                    if multilevel:
+                        positive,negative=levels[code],levels[code^15]
+                    else:
+                        level=noise['level']<<4
+                        positive,negative=(240,level) if code else (level,240)
                     for n,value in ((pair,positive),(pair+1,negative)):
                         oscillator=oscillators[n]
-                        oscillator.attack=oscillator.decay=value
+                        oscillator.decay=value
+                        if not linear:
+                            oscillator.attack=value
                 previous=current
             left=0
             for oscillator in oscillators:
