@@ -1,3 +1,12 @@
+/*
+ * River Raid™ by Carol Shaw / Activision
+ * © 1982, 1983 Activision
+ *
+ * Picocomputer 6502 port
+ * © 2026 WojciechGw
+ * with assistance from Codex GPT-6.1 Sol High
+ */
+
 #include <rp6502.h>
 #include <string.h>
 #include "xram.h"
