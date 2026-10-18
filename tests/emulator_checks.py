@@ -532,6 +532,8 @@ def main():
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
     parser.add_argument("--intro-only",action="store_true")
+    parser.add_argument("--gameover-only",action="store_true")
+    parser.add_argument("--victory-only",action="store_true")
     parser.add_argument("--audio-switch-only",action="store_true")
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
@@ -605,6 +607,18 @@ def main():
         from intro_checks import run_intro_checks
         run_intro_checks(case, sym, boot, output, build, dict(load_image.assets))
         print(f"All {count} intro checks passed.", flush=True)
+        return
+
+    if args.victory_only:
+        from victory_checks import run_victory_checks
+        run_victory_checks(case,sym,fixture,resume,boot,dict(load_image.assets),load_image)
+        print(f"All {count} victory checks passed.",flush=True)
+        return
+
+    if args.gameover_only:
+        from gameover_checks import run_gameover_checks
+        run_gameover_checks(case,sym,fixture,resume,boot,build,dict(load_image.assets))
+        print(f"All {count} game-over checks passed.",flush=True)
         return
 
     if args.missiles_only:
@@ -1920,6 +1934,10 @@ def main():
     run_help_checks(case,sym,boot,output)
     from missile_checks import run_missile_checks
     run_missile_checks(case,sym,boot,fixture,resume)
+    from gameover_checks import run_gameover_checks
+    run_gameover_checks(case,sym,fixture,resume,boot,build,dict(load_image.assets))
+    from victory_checks import run_victory_checks
+    run_victory_checks(case,sym,fixture,resume,boot,dict(load_image.assets),load_image)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

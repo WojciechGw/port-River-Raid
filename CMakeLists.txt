@@ -17,9 +17,24 @@ else()
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(RIVER_CORE ${CMAKE_CURRENT_BINARY_DIR}/original_core.asm)
     set(RIVER_INTRO_SCORE ${CMAKE_CURRENT_BINARY_DIR}/intro-score.bin)
-    add_custom_command(OUTPUT ${RIVER_INTRO_SCORE}
+    set(RIVER_GAMEOVER_SCORE ${CMAKE_CURRENT_BINARY_DIR}/gameover-score.bin)
+    set(RIVER_VICTORY_SCORE ${CMAKE_CURRENT_BINARY_DIR}/victory-score.bin)
+    add_custom_command(OUTPUT ${RIVER_VICTORY_SCORE} ${CMAKE_CURRENT_BINARY_DIR}/victory-score.inc
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_gameover.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/victory-score.json ${RIVER_VICTORY_SCORE}
+            ${CMAKE_CURRENT_BINARY_DIR}/victory-score.inc --prefix VICTORY
+        DEPENDS src/victory-score.json tools/make_gameover.py
+        VERBATIM)
+    add_custom_command(OUTPUT ${RIVER_GAMEOVER_SCORE} ${CMAKE_CURRENT_BINARY_DIR}/gameover-score.inc
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_gameover.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/src/gameover-score.json ${RIVER_GAMEOVER_SCORE}
+            ${CMAKE_CURRENT_BINARY_DIR}/gameover-score.inc
+        DEPENDS src/gameover-score.json tools/make_gameover.py
+        VERBATIM)
+    add_custom_command(OUTPUT ${RIVER_INTRO_SCORE} ${CMAKE_CURRENT_BINARY_DIR}/intro-score.inc
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_intro.py
             ${CMAKE_CURRENT_SOURCE_DIR}/src/intro-score.json ${RIVER_INTRO_SCORE}
+            --include ${CMAKE_CURRENT_BINARY_DIR}/intro-score.inc
         DEPENDS src/intro-score.json tools/make_intro.py
         VERBATIM)
     set(RIVER_MOUNTAINS ${CMAKE_CURRENT_BINARY_DIR}/mountains.h)
@@ -75,7 +90,7 @@ else()
         VERBATIM)
     add_executable(riverraid
         src/riverraid.asm src/duo.asm src/cover.asm src/intro.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/engine.asm src/sound_status.asm src/demo_footer.asm ${RIVER_CORE}
-        ${RIVER_INTRO_SCORE}
+        ${RIVER_INTRO_SCORE} ${RIVER_GAMEOVER_SCORE} ${RIVER_VICTORY_SCORE} src/gameover.asm
         ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
@@ -92,6 +107,13 @@ else()
     rp6502_asset(riverraid help src/help.txt)
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
     rp6502_asset(riverraid intro.bin ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
+    rp6502_asset(riverraid intro-drums.pcm assets/intro-drums.pcm)
+    rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.gameover)
+    rp6502_asset(riverraid gameover-code.bin ${CMAKE_CURRENT_BINARY_DIR}/riverraid.gameover)
+    rp6502_asset(riverraid gameover-score.bin ${RIVER_GAMEOVER_SCORE})
+    rp6502_asset(riverraid gameover.pcm assets/gameover.pcm)
+    rp6502_asset(riverraid victory-score.bin ${RIVER_VICTORY_SCORE})
+    rp6502_asset(riverraid victory.pcm assets/victory.pcm)
     # Named assets are read from ROM: on demand; they are not preloaded to XRAM.
     rp6502_asset(riverraid cover.bin ${RIVER_COVER_IMAGE})
     rp6502_asset(riverraid cover-fade.bin ${RIVER_COVER_FADES})

@@ -11,6 +11,13 @@ def run_bridge_tank_checks(case, sym, fixture, resume):
         poke(0x96,4), poke(0x9c,0x37), poke(0xb5,0),
         "press down", "press f5", "run 2", "release f5", "run 2"]
     base += [poke(0xcd+n*2,88 if n<5 else 0) for n in range(6)]
+    for kind in (0,8):
+        _,data=case(f'road-tank-lowered-{kind}',base+[
+            poke(0xa2,kind),poke(tank,struct.pack('<hBBB',47,1,0,0)),
+            'run 3','dump xram:0x0328 10','dump xram:0x0378 10'])
+        road_y=struct.unpack_from('<h',data[0],2)[0]
+        tank_y=struct.unpack_from('<h',data[1],2)[0]
+        assert tank_y==road_y+10, 'Road tank must sit two rows below its original offset'
     for direction in (0,1):
         _,data=case(f"road-tank-spawn-motion-{direction}",base+[
             poke(sym["tanks"],[0]*30),poke(0xa8,0),poke(0xae,1^direction),
@@ -115,10 +122,10 @@ def run_bridge_tank_checks(case, sym, fixture, resume):
     _,data=case("bridge-gunner-scroll-and-restart",shooting+[
         poke(tank,struct.pack("<hBBB",47,1,0,0)),poke(sym['road_gunner'],2),
         poke(0x8b,31),poke(0xb5,254),poke(0xb6,2),
-        poke(gunner,struct.pack('<hhh7B',47,95,56,0,1,90,1,88,0,47))
+        poke(gunner,struct.pack('<hhh7B',47,97,56,0,1,90,1,88,0,47))
     ]+resume+[f"dump 0x{gunner:04x} 13", f"dump 0x{sym['road_gunner']:04x} 1",
         "press r","run 4","release r","run 4",f"dump 0x{gunner:04x} 13"])
-    assert data[1][0]==1 and struct.unpack_from('<h',data[0],2)[0]>95
+    assert data[1][0]==1 and struct.unpack_from('<h',data[0],2)[0]>97
     assert 0<data[0][8]<90 and struct.unpack_from('<h',data[0],4)[0]>56
     assert not any(data[2]), "Restart retained the survivor's round"
 

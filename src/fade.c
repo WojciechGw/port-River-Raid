@@ -4,6 +4,8 @@
 /* Startup only: preserve every palette, including transparent entries, above
  * the audio ring. Prepare colors offscreen; publish them together at VSYNC. */
 #pragma optimize(push, on)
+#pragma code-name("STARTUP_AUDIO")
+#pragma bss-name("STARTUP_AUDIO")
 void game_fade_capture(void);
 void game_fade_publish(void);
 uint16_t game_fade_read(void);

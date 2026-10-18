@@ -4,7 +4,9 @@
 .importzp ptr1
 .import _row, _hud_column, _hud_length, _hud_ink, _hud_fill
 .export _duo_fuel_row
-.segment "CODE"
+.segment "GAMEOVER"
+; DUO is selected only after startup. Reuse the installed runtime overlay's
+; spare space, leaving the fixed 1 KiB C stack intact.
 ; Copy GAME 1 artwork and color its background in one pass.
 ; hud_fill is the first unfilled column; opaque ink always stays in front.
 _duo_fuel_row:
@@ -29,6 +31,7 @@ _duo_fuel_row:
     dey
     bpl @pixel
     rts
+.segment "CODE"
 _duo_load:
     sta ptr1
     stx ptr1+1

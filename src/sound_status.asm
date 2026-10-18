@@ -13,13 +13,12 @@ SOUND_ICON_X = 320-8
 SOUND_ICON_Y = 240-8
 
 .segment "ZEROPAGE"
-sound_notice: .res 2
+sound_notice: .res 1
 
 ; Use low RAM to keep the auxiliary segment below CPB's $FE00 page.
 .segment "CODE"
 _sound_status_init:
     stz sound_notice
-    stz sound_notice+1
     lda #1
     sta RIA_STEP0
     lda #<SOUND_CONFIG
@@ -68,21 +67,14 @@ sound_args:
 .segment "CODE"
 ; Count all 60 Hz display frames, including pause and attract mode.
 _sound_status_notify:
-    lda #<300
+    lda #<60
     sta sound_notice
-    lda #>300
-    sta sound_notice+1
     rts
 _sound_status_tick:
     lda sound_notice
-    bne @decrement
-    lda sound_notice+1
     beq @done
-    dec sound_notice+1
-@decrement:
     dec sound_notice
     lda sound_notice
-    ora sound_notice+1
     beq _sound_status_update
 @done:
     rts
@@ -98,7 +90,6 @@ _sound_status_update:
     sta RIA_ADDR0+1
     lda _sound_verbose
     ora sound_notice
-    ora sound_notice+1
     beq @right
     lda #<280
     bra @position
@@ -130,7 +121,6 @@ _sound_status_update:
     ; Text follows the icon in XRAM; continue through the same port.
     lda _sound_verbose
     ora sound_notice
-    ora sound_notice+1
     beq @text_index
     lda _audio_backend
     asl a

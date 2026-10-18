@@ -37,10 +37,11 @@ typedef struct {
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
  * pixels before game initialization and after audio stops on exit. */
 #define XRAM_COVER_STATE 0x00B0
-/* Only on the startup cover: OPL register page at $0100, score at $F100.
- * Both are released before the manual/game uses these regions. The player
- * and shared screen helpers temporarily occupy reset_tiles in CPU RAM. */
+/* Startup-only OPL/PCM and score. Shared helpers borrow reset_tiles;
+ * the player borrows 1024 bytes of derived graphics tables at sprites.
+ * All are released/rebuilt before gameplay; F1 loads only shared helpers. */
 #define XRAM_INTRO_OPL 0x0100
+#define XRAM_INTRO_PCM 0x09F8
 #define XRAM_INTRO_SCORE 0xF100
 /* Scene: 0 cover, 1 outro, 2 manual. */
 #define XRAM_COVER_SCENE 0x00B4
@@ -142,6 +143,7 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define TANK_WIDTH 9
 #define TANK_HEIGHT 9
 #define TANK_TOP 8
+#define ROAD_TANK_Y_OFFSET 2
 #define TANK_MUZZLE_Y (TANK_TOP + 1)
 #define TANK_TRACK_BOTTOM_Y (TANK_TOP + TANK_HEIGHT - 1)
 #define TANK_IMAGE_WIDTH 12

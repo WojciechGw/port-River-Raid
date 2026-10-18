@@ -1,5 +1,13 @@
 # Testy portu
 
+`classic-selection-life-icons-game1/2` sprawdzają po trzy ikony żyć na ekranie
+wyboru po pierwszym uruchomieniu i powrocie z F1, a następnie rzeczywiste
+wartości 3, 1 i 0 podczas rozgrywki.
+
+`duo-selection-lives-and-fuel` sprawdza po trzy ikony samolotów i pełne
+wskaźniki paliwa dla obu graczy po wybraniu GAME 3, powrocie z F1 i ponownym
+wyborze trybu. Sprawdza też ukrycie ikon DUO po przejściu do GAME 1.
+
 Po zbudowaniu Release: `python tests/emulator_checks.py`.
 `python tests/emulator_checks.py --cpb --missiles-only` sprawdza przesunięte
 miejsce wystrzału i zgodność koloru pocisku z samolotem w GAME 1, GAME 2
@@ -30,20 +38,45 @@ wszystkie poziomy palety fade in/out oraz zachowanie okładki podczas
 oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
 i napisu oraz brak automatycznego wczytywania okładki do XRAM.
 `python tests/emulator_checks.py --screens-only` uruchamia testy plansz.
-Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test odczytuje
-rejestry OPL2 przez pełny utwór i początek następnej pętli, porównując każdą
-klatkę z partyturą. Sprawdza wyłączenie muzyki po okładce, ciszę w instrukcji,
+`python tests/emulator_checks.py --gameover-only` sprawdza melodię po utracie
+ostatniego samolotu: GAME 1 oraz wyczerpanie samolotów obu graczy w GAME 2
+i GAME 3. W GAME 2 sprawdza też brak melodii, gdy drugi gracz ma jeszcze samoloty.
+Porównuje cały przebieg rejestrów OPL2 i każdą stronę PCM,
+włącznie ze zwolnieniem tempa i wybrzmieniem, oraz sprawdza przerwanie przez
+wyciszenie, pauzę, restart, zmianę backendu/trybu i ekran pomocy.
+Źródłowe dane importuje `tools/import_gameover.py` z generatora firmware przy
+200 BPM; `tools/make_gameover.py` kompiluje partyturę podczas budowania ROM-u.
+`python tests/emulator_checks.py --victory-only` sprawdza zniszczenie mostów
+z numerem BRIDGE 5, 20 i 50 na HUD w każdym trybie, obu graczy GAME 2,
+oba źródła strzału w GAME 3 i oba kolory drogi po zmianie etapu. Sprawdza dodatkowe
+życia, limity, nagrodę przy wyciszeniu, niezależną premię punktową i brak
+podwójnej nagrody przy jednoczesnym trafieniu. Cały utwór jest porównywany
+z partyturą i PCM, łącznie ze zwolnieniem werbla oraz wybrzmieniem.
+Regresja `victory-natural-bridge5-hud` generuje dojazd w natywnym kodzie gry,
+pozwala HUD przejść z 4 na 5 i dopiero wtedy trafia most; kolor drogi nie może
+cofnąć numeru użytego do przyznania nagrody.
+Import: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --name victory --bpm 96`.
+Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test porównuje
+rejestry OPL2 i każdą stronę perkusji PCM przez pełny utwór i początek następnej
+pętli. Symuluje odbiór 16000 próbek/s, sprawdzając synchronizację i zapas bufora.
+Sprawdza wyłączenie muzyki po okładce, ciszę w instrukcji,
 uruchomienie rozgrywki z każdym backendem i zachowanie obrazu po F1.
-Odtwarzacz zajmuje tymczasowo 512 bajtów `reset_tiles`; dane utworu są w
-XRAM `$F100`, a rejestry OPL2 w `$0100`. Ładowanie instrukcji przez F1
+Wspólne funkcje ekranów zajmują 512 bajtów `reset_tiles`; odtwarzacz używa
+dodatkowo 1024 bajtów od `sprites`, tylko przed pierwszym uruchomieniem gry.
+Dane nut są w XRAM `$F100`, rejestry OPL2 w `$0100`, a nagłówek i bufor PCM
+w `$09F8..$0DFF`. Perkusja pochodzi z zasobu ROM `intro-drums.pcm`.
+Ładowanie instrukcji przez F1
 nie może nadpisać kopii obrazu gry w `$F100..$F8FF`.
 
 Modelowy odsłuch całego intro (z zachowaniem ponownych wyzwoleń tej samej nuty):
 `python tools/preview_intro.py build/cc65/release/intro-score.bin --opl-library
 build/opl-engine-preview/opl-preview.dll --output build/intro.wav`.
 Bibliotekę tworzy się z `tools/opl_preview.c` i rdzenia emu8950 firmware.
-Partytura JSON zawiera klatkę początku, długość, numer nuty MIDI i poziom TL;
+Partytura JSON zawiera początek i długość w szesnastkach, nutę MIDI, poziom TL
+i parametry instrumentów. Szesnastka trwa 1712 próbek przy 16 kHz.
 `tools/make_intro.py` kompiluje ją bez dodatkowych pakietów Pythona.
+`tools/import_intro.py` importuje nuty, brzmienia i perkusję ze skryptu firmware
+`riverraid_rom_gen.py --bpm 140`; w JSON zapisuje też skróty SHA-256 źródła i PCM.
 
 `manual-fades-and-wait` sprawdza obraz z `assets/manual.bmp`, wszystkie poziomy
 fade in/out, napis PRESS ANY KEY TO START THE GAME oraz oczekiwanie na osobny
@@ -67,8 +100,10 @@ interpolacji miksera i toru audio fizycznego komputera.
 Opcja `--audio-only` uruchamia wyłącznie scenariusze dźwięku.
 Testy `f10-*` obejmują cykl PSG/OPL2/PCM, przytrzymanie klawisza,
 pauzę, blokadę podczas wyciszenia F9, powrót z F1 oraz przełączanie podczas
-lotu solo i DUO. Sprawdzają napis PSG/OPL/PCM pod scrollerem przez 5 sekund,
+lotu solo i DUO. Sprawdzają napis PSG/OPL/PCM pod scrollerem przez 1 sekundę,
 odnowienie czasu kolejnym F10 i brak odnawiania przy przytrzymaniu klawisza.
+Testy `f9-unmute-notice-*` sprawdzają usunięcie ikony wyciszenia i sekundowy
+napis po włączeniu dźwięku, także przy przytrzymaniu F9, dla każdego generatora.
 Ponieważ emulator obsługuje PCM, brak tego interfejsu jest sprawdzany przez
 symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
 Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.

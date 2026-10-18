@@ -45,12 +45,12 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         _,data=case(f'f10-live-muted-{"duo" if duo else "solo"}',commands)
         assert all(not any(a) for a in data[:-1]) and any(data[-1])
 
-    # The five-second notice also expires while the game is paused.
+    # The one-second notice also expires while the game is paused.
     for option,current,label in (('psg',2,b'OPL '),('opl2',3,b'PCM '),('pcm',1,b'PSG ')):
-        _,data=case(f'f10-notice-five-seconds-{option}',fixture+tap+[
+        _,data=case(f'f10-notice-one-second-{option}',fixture+tap+[
             backend+f' {current}', 'dump xram:0x0220 30', 'dump xram:0x02c8 4',
             f'shot "{(output / f"f10-notice-{option}.png").as_posix()}"',
-            'run 290','dump xram:0x02c8 4','run 10','dump xram:0x02c8 4',
+            'run 50','dump xram:0x02c8 4','run 10','dump xram:0x02c8 4',
             'peek xram:0x0232 56 1'],
             rom_args=('/'+option,))
         assert int.from_bytes(data[0][2:4],'little')==296
@@ -59,16 +59,29 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         assert int.from_bytes(data[0][4:6],'little')==232
         assert data[1:]==[label,label,b'    ']
 
-    _,data=case('f10-notice-refresh',fixture+tap+['run 250']+tap+[
-        backend+' 1','run 50','dump xram:0x02c8 4','run 240',
+    _,data=case('f10-notice-refresh',fixture+tap+['run 30']+tap+[
+        backend+' 1','run 30','dump xram:0x02c8 4','run 20',
         'dump xram:0x02c8 4','run 10','dump xram:0x02c8 4'])
     assert data==[b'PSG ',b'PSG ',b'    ']
     _,data=case('f10-hold-does-not-refresh',fixture+[
         'press f10','run 3',backend+' 3','dump xram:0x02c8 4',
-        'run 310',backend+' 3','dump xram:0x02c8 4',
+        'run 70',backend+' 3','dump xram:0x02c8 4',
         'release f10','run 3','press f10','run 3',backend+' 1',
         'release f10','run 3','dump xram:0x02c8 4'])
     assert data==[b'PCM ',b'    ',b'PSG ']
+
+    for option,current,label in (('psg',1,b'PSG '),('opl2',2,b'OPL '),('pcm',3,b'PCM ')):
+        _,data=case(f'f9-unmute-notice-{option}',fixture+[
+            'press f9','run 3','release f9','run 3',muted+' 1',
+            'dump xram:0x02c0 8','dump xram:0x02c8 4',
+            'press f9','run 3',muted+' 0',backend+f' {current}',
+            'dump xram:0x02c0 8','dump xram:0x02c8 4',
+            'run 50','dump xram:0x02c8 4','run 10',
+            'dump xram:0x02c8 4','release f9','run 3'],
+            rom_args=('/'+option,))
+        assert any(data[0]) and not any(data[2]), 'F9 did not hide the muted note'
+        assert data[1]==b'    '
+        assert data[3:]==[label,label,b'    '], 'F9 notice did not expire while held'
 
     # This emulator always supports PCM. Simulate the capability probe's
     # negative return, without changing production code or CLI options.

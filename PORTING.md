@@ -50,8 +50,8 @@ and the F1 manual. Sound starts enabled when the program is launched.
 F10 cycles PSG → OPL2 → PCM → PSG, skipping PCM when the firmware rejects
 its interface. It stops the previous backend before initializing the next,
 ignores presses while F9 has muted sound, and retains the selection through
-F1 and restart. A successful F10 press shows PSG, OPL or PCM for 300 display
-frames (five seconds), including paused frames. Each new press restarts the
+F1 and restart. A successful F10 press or unmuting with F9 shows PSG, OPL or PCM for 60 display
+frames (one second), including paused frames. Each new such press restarts the
 timer; holding the key does not. Opening F1 dismisses the transient label.
 With `/v`, the note and backend remain visible. The icons are defined in
 `src/graphics.h` and drawn at (312,232) as a 1bpp bitmap;
@@ -61,7 +61,7 @@ The text uses the VGA's built-in 8×8 font in
 [character mode](https://picocomputer.github.io/vga.html). Both are white on
 the black margin below the scroller, update on F9/F10, expiry or initialization, and share
 the white splash palette for startup fade. Without `/v`, only the muted icon
-is shown, with a temporary backend label after F10 when sound is enabled.
+is shown, with a temporary backend label after F9 enables sound or F10 switches the backend.
 F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
@@ -285,6 +285,17 @@ unchanged. The configuration at $02A0 moves the message off-screen every
 30 VSYNCs, giving half a second of visibility and half a second of darkness.
 The message appears after fade in and disappears when a key is pressed,
 before fade out.
+Cover music imports the firmware `riverraid_rom_gen.py --bpm 140` arrangement:
+seven OPL2 channels and signed 8-bit mono PCM drums at 16 kHz. The sequencer
+advances every 1712 consumed PCM samples, matching the generator's rounded
+140.186916 BPM tempo. The eight bars occupy 219136 samples (13.696 seconds).
+ROM reads refill a 1024-byte ring at $0A00, with its header at $09F8; the
+separate drum descriptor leaves palette streaming independent during fades.
+Without PCM support, a display-clock fallback plays the OPL2 part alone.
+Both sound devices stop after fade out. The startup player borrows 1024 bytes
+of derived graphics tables beginning at `sprites`; these are rebuilt before
+gameplay. F1 only reloads the shared 512-byte `reset_tiles` overlay and never
+overwrites live sprites or HUD state with the startup player.
 After fade in, the program waits for any HID key, including function keys
 and modifiers; LED status bits do not dismiss the cover. The dismissal key
 is consumed through its release so it cannot also trigger game controls.
@@ -402,6 +413,36 @@ For the emulator, use `rp6502-emu.exe riverraid.rp6502 -- /opl2`.
 The SDK's optional `__argv_mem` allocator uses the existing 512-byte
 `reset_tiles` buffer. Arguments are parsed before cover/video initialization
 reuses that buffer, avoiding a heap allocation and a permanent argv buffer.
+
+The one-shot jingles in `src/gameover.asm` share a sequencer and stream buffer.
+The final-plane jingle uses the firmware generator's exact
+OPL2 register writes and signed 16 kHz PCM at 200 BPM, including the last-bar
+slowdown. GAME 1 detects the player's final death; GAME 2 requires both native
+life pointers to indicate elimination, and GAME 3 requires both life counters
+to reach zero. It plays once, then restores the gameplay backend.
+Mute, pause, restart, help and backend/mode changes cancel playback. An automatic
+GAME 2 turn change does not trigger it while the other pilot has planes left.
+With no PCM support, VSYNC clocks the OPL2 part.
+The score occupies XRAM $F900, OPL2 registers $C900, and the PCM header/ring
+$C000/$C008 (1024 bytes). ROM pages stream three pages ahead of the consumer.
+After initial video setup, the player replaces startup-only argument parsing,
+palette conversion and fade code in `STARTUP_AUDIO`; its temporary ZP copy routine then becomes
+player state. This preserves the 1 KiB stack and survives returning from F1.
+The installed overlay also holds the DUO fuel-row renderer, which is first
+used after selecting GAME 3. Before a flight starts, both DUO HUD panels show
+three planes and full fuel; an active flight uses the actual player state.
+
+The native bridge destruction path queues the victory fanfare when the HUD's
+BRIDGE number is 5, 20 or 50. Native scrolling can advance that number before
+destruction; the hook uses the visible number without a parity-based rollback.
+The object changes to an explosion before the hook, so simultaneous DUO shots
+cannot award twice. After both DUO contexts are saved, the reward adds one
+reserve to the current classic player, or one life to both DUO players, capped
+at nine classic reserves / ten DUO planes. An eliminated DUO pilot returns to
+the normal waiting-for-bridge state. Score bonuses remain independent, and
+mute suppresses only playback. The 96 BPM OPL2 + PCM arrangement preserves the
+generator's broadening snare roll and final release. A final death interrupts
+victory playback with the game-over jingle.
 
 PSG uses all eight oscillators. The engine is signed binary polynomial noise
 with a variable sample clock, approximately 1000 Hz when slow and 3000 Hz when

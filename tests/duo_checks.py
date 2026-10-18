@@ -1,5 +1,7 @@
 """Execute GAME 3 on the actual 6502, including shared-world edge cases."""
 import struct
+import re
+from pathlib import Path
 from emulator_checks import poke
 
 
@@ -48,6 +50,31 @@ def run_duo_checks(case, sym, boot, output):
 
     fixture += ['run 2']
 
+    # The selection screen has no active DUO state yet, but must show each
+    # pilot's starting equipment. F1 and a second selection must preserve it.
+    preview_dump=['dump xram:0x6400 200','dump xram:0xa640 2560']
+    _,preview=case('duo-selection-lives-and-fuel',select+['run 8']+preview_dump+[
+        f'shot "{(output / "duo-selection.png").as_posix()}"',
+        'press f1','wait xram:0x00b0 2 120','release f1',
+        'wait xram:0x02a4 222 5','press space','run 3','release space',
+        'wait xram:0x0080 82 240','run 4']+preview_dump+[
+        'press f2','run 3','release f2','run 8','peek 0x80 0',
+        'dump xram:0x6400 200']+['press f2','run 3','release f2','run 8']*2+
+        ['peek 0x80 2']+preview_dump)
+    graphics=(Path(__file__).resolve().parents[1]/'src/graphics.h').read_text(encoding='utf-8')
+    gauge_source=graphics.split('static const char fuel_gauge',1)[1].split('};',1)[0]
+    gauge=re.findall(r'"([.X]+)"',gauge_source)
+    assert len(gauge)==16 and all(len(row)==39 for row in gauge)
+    for icons,bitmap in ((preview[0],preview[1]),(preview[2],preview[3]),(preview[5],preview[6])):
+        for n in (0,1):
+            for i in range(10):
+                assert struct.unpack_from('<h',icons,(n*10+i)*10+2)[0]==(192 if i<3 else -256)
+            for y,row in enumerate(gauge):
+                expected=bytes(0x77 if p=='X' else (0x66 if n else 0x88) if x<38 else 0xaa
+                               for x,p in enumerate(row))
+                assert bitmap[y*160+4+n*80:y*160+43+n*80]==expected, f'P{n+1} fuel preview row {y}'
+    assert all(struct.unpack_from('<h',preview[4],i*10+2)[0]<0 for i in range(20))
+
     _, buffers = case('duo-start-two-visible',start+dump+[
         'dump xram:0x03e6 20',f'shot "{(output / "duo.png").as_posix()}"'])
     assert buffers[0][19]==buffers[0][42]==1
@@ -61,7 +88,7 @@ def run_duo_checks(case, sym, boot, output):
     for n,count in enumerate((10,6)):
         for i in range(10):
             x,y,art,palette,size,options=struct.unpack_from('<hhHHBB',buffers[0],(n*10+i)*10)
-            assert x==(44+n*80+(i%5)*7)*2
+            assert x==86+n*160+(i%5)*15
             assert y==(182+10+(9 if i>=5 else 0) if i<count else -256)
             assert art==0x9c80 and palette==(0x0760 if n else 0x0740)
     for i in (12,13,17):
@@ -359,7 +386,7 @@ def run_duo_checks(case, sym, boot, output):
 
         for phase in (1,2):
             # Same trajectory as a bank tank: flight is safe, splash is not.
-            shot=struct.pack('<hhh7B',47,96,60+n*30,0,1,90,phase,110,6,47)
+            shot=struct.pack('<hhh7B',47,98,60+n*30,0,1,90,phase,110,6,47)
             _,buffers=case(f'duo-road-gunner-phase{phase}-p{n+1}',fixture+[
                 poke(0xa1,0),poke(sym['tanks']+5,struct.pack('<hBBB',47,1,0,0)),
                 poke(sym['road_gunner'],1),poke(sym['bank_tanks']+26,shot)

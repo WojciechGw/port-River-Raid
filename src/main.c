@@ -195,6 +195,8 @@ static void profile_phase(uint8_t phase)
 #define PROFILE_PHASE(n) ((void)0)
 #endif
 #define RGB(r,g,b) ((uint16_t)(((uint16_t)(b)<<11)|((g)<<6)|(r)|32))
+#pragma code-name(push, "STARTUP_AUDIO")
+#pragma rodata-name(push, "STARTUP_AUDIO")
 static const uint8_t hues[16][3] = {
     {31,31,31},{29,26,4},{31,18,3},{31,11,5},{29,6,12},{23,6,23},
     {13,6,29},{7,9,31},{4,14,31},{3,21,29},{3,26,24},{5,27,14},
@@ -214,6 +216,8 @@ static uint16_t tia_rgb(uint8_t code)
     if (r>31) r=31; if (g>31) g=31; if (b>31) b=31;
     return RGB(r,g,b);
 }
+#pragma rodata-name(pop)
+#pragma code-name(pop)
 static void upload(uint16_t address,const void* data,uint16_t count)
 { xram0_write(address,data,count); }
 static uint16_t image_address(uint8_t id)
@@ -859,7 +863,7 @@ static void bank_tanks_tick(uint8_t scroll)
     if (road_gunner==255) {
         if (t->status) memset(t,0,sizeof(*t));
     } else {
-        sy=128+OFFSET-(int16_t)road_gunner*32-scroll;
+        sy=(128+ROAD_TANK_Y_OFFSET)+OFFSET-(int16_t)road_gunner*32-scroll;
         if (!t->status || t->y!=sy) {
             memset(t,0,sizeof(*t));
             t->x=tanks[road_gunner].x; t->y=sy;
@@ -1057,10 +1061,10 @@ static void collisions(void)
         if (!ready && !MODE && (id==8 || id<4) && tanks[n].status==1) {
             static int16_t tx;
             static uint8_t tf;
-            tx=tanks[n].x; tf=tanks[n].direction;
+            tx=tanks[n].x; sy=oy+ROAD_TANK_Y_OFFSET; tf=tanks[n].direction;
             if (MY<=161 && MX>=tx && MX<tx+TANK_WIDTH) {
                 for (y=0;y<8;++y) {
-                    dy=by+y-oy;
+                    dy=by+y-sy;
                     if (dy>=0 && dy<32 && opaque(TANK_ID,MX-tx,dy,tf,0)) {
                         if (tank_on_bridge(n)) G(0xe2)=n;
                         else MY=180;
@@ -1068,9 +1072,10 @@ static void collisions(void)
                     }
                 }
             }
-            if (tanks[n].status==1 && tx+TANK_WIDTH>px && tx<px+8 && oy<player_y+18 && oy+32>player_y) {
+            /* Overlap of the 18-row plane and 32-row tank block. */
+            if (tanks[n].status==1 && tx+TANK_WIDTH>px && tx<px+8 && (uint16_t)(player_y+17-sy)<49) {
                 for (y=0;y<18;++y) {
-                    dy=player_y+y-oy; if (dy<0 || dy>=32) continue;
+                    dy=player_y+y-sy; if (dy<0 || dy>=32) continue;
                     jbits=G(JET_ADDRESS+18-y);
                     for (x=0;x<8;++x) if (jbits&(reflected ? (1<<x) : (0x80>>x))) {
                         dx=px+x-tx;
@@ -1107,7 +1112,7 @@ enemy_checked:
                 }
             }
         }
-        if (ox+widths[id]<=px || ox>=px+8 || oy>=player_y+18 || oy+32<=player_y) continue;
+        if (ox+widths[id]<=px || ox>=px+8 || (uint16_t)(player_y+17-oy)>=49) continue;
         for (y=0;y<18;++y) {
             dy=player_y+y-oy; if (dy<0 || dy>=32) continue;
             /* Empty object rows cannot touch the plane, even when the
@@ -1229,7 +1234,9 @@ static void hud_details(void)
 {
     static uint8_t level,reserves,i,dirty;
     demo_footer_tick();
-    level=G(0xbd); reserves=G(0xc0)<80 ? G(0xc0)/8 : 0; dirty=high_dirty;
+    /* Attract mode uses Space in the native life pointer. Preview the
+     * starting reserves, just as the GAME 3 selection HUD does. */
+    level=G(0xbd); reserves=ready ? 3 : G(0xc0)<80 ? G(0xc0)/8 : 0; dirty=high_dirty;
     if (shown_level!=level || shown_variant!=VAR) {
         /* Digit images are prepared once. Three sprites avoid rasterizing
          * extra numbers during the same frame as a reset and palette change. */
@@ -1299,7 +1306,7 @@ static void duo_lives_hud(void)
     static uint8_t n,i,lives,previous;
     static uint16_t address;
     for (n=0;n<2;++n) {
-        lives=VAR==2 ? duo_players[n].lives>>3 : 0;
+        lives=VAR==2 ? (duo_started ? duo_players[n].lives>>3 : 3) : 0;
         previous=shown_duo_lives[n];
         if (previous==lives) continue;
         shown_duo_lives[n]=lives;
@@ -1361,7 +1368,7 @@ static void render(void)
             sprites[n+10].size=0x71;
             sprites[n+10].options=0x42|(tanks[n].direction ? 0x10 : 0);
             if (ti==TANK_ID) {
-                sprites[n+10].y+=TANK_TOP; sprites[n+10].size=0x32;
+                sprites[n+10].y+=TANK_TOP+ROAD_TANK_Y_OFFSET; sprites[n+10].size=0x32;
                 if (tanks[n].direction) sprites[n+10].x-=(TANK_IMAGE_WIDTH-TANK_WIDTH)*2;
             }
         }
@@ -1503,7 +1510,7 @@ static void duo_hud(void)
         duo_p=duo_players+n;
         for (i=0;i<6;++i) hud_sprites[n*6+i].image=XRAM_SCORE_DIGITS+
             (uint16_t)(duo_started ? duo_p->score[i]>>3 : i==5 ? 0 : 11)*32;
-        fuel=duo_started ? duo_p->fuel_hi>>3 : 0;
+        fuel=duo_started ? duo_p->fuel_hi>>3 : 31;
         /* One complete gauge per frame bounds the cost at 8 MHz. A second
          * changed gauge keeps its old value and is drawn on the next frame. */
         if (!fuel_drawn && old_score[n]!=fuel) {
@@ -1576,7 +1583,8 @@ static uint8_t configure_video(uint8_t restoring)
         for (y=0;y<8;++y) upload(XRAM_TILES+(uint16_t)i*32+y*4,row,4);
     }
     xram0_set(XRAM_TILES+TERRAIN_BANK_SOLID*32,0xcc,32);
-    for (i=0;i<128;++i) tia_palette[i]=tia_rgb(i*2);
+    /* CPU palette survives F1; its startup converter is reused by jingles. */
+    if (!restoring) for (i=0;i<128;++i) tia_palette[i]=tia_rgb(i*2);
     prepare_images(); refresh_palettes();
     for (i=0;i<3;++i) {
         write_jet_image((uint16_t)(i==0 ? rr_JetStraight : i==1 ? rr_JetMove : rr_JetExplode)-1);
@@ -1623,7 +1631,8 @@ static uint8_t configure_video(uint8_t restoring)
     life_sprite.y=-256; life_sprite.image=XRAM_RESERVE_IMAGE;
     life_sprite.size=0x11; life_sprite.options=0x42;
     for (i=0;i<DUO_LIFE_SPRITE_COUNT;++i) {
-        life_sprite.x=(44+(i/10)*80+(i%5)*7)*2;
+        /* Wings span 14 screen pixels; pitch 15 leaves a one-pixel gap. */
+        life_sprite.x=86+(i/10)*160+(i%5)*15;
         life_sprite.palette=i<10 ? XRAM_DUO_HUD_P1_PALETTE : XRAM_DUO_HUD_P2_PALETTE;
         upload(XRAM_DUO_LIFE_SPRITES+i*sizeof(sprite_t),&life_sprite,sizeof(life_sprite));
     }
@@ -1678,6 +1687,7 @@ int main(int argc,char** argv)
     while (MODE!=255) rr_step();
     xram0_set(XRAM_PSG,0,64);
     if (!configure_video(0)) return 1;
+    gameover_install();
     last_vsync=RIA.vsync;
     for (;;) {
         do {now=RIA.vsync;} while (now==last_vsync);
@@ -1714,7 +1724,10 @@ int main(int argc,char** argv)
         if (changes&4) {
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
         }
-        if (changes&32) audio_muted^=1;
+        if (changes&32) {
+            audio_muted^=1;
+            if (!audio_muted) sound_status_notify();
+        }
         if ((changes&64) && !audio_muted) {
             if (!audio_next()) return 1;
             sound_status_notify();

@@ -11,7 +11,7 @@ typedef struct {
     uint8_t state, timer, spawn_x, y;
 } duo_player_t;
 _Static_assert(sizeof(duo_player_t)==23, "DUO native register layout");
-static duo_player_t duo_players[2];
+duo_player_t duo_players[2];
 uint8_t duo_call, duo_dead;
 /* Screen Y of the current collision context; native modes always use 142. */
 uint8_t player_y=142;

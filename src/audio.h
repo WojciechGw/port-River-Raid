@@ -9,5 +9,8 @@ uint8_t audio_init(void);
 uint8_t audio_next(void);
 void audio_update(uint8_t paused, uint8_t demo);
 void audio_stop(void);
+void gameover_install(void);
+uint8_t gameover_update(void);
+void gameover_stop(void);
 
 #endif

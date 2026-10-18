@@ -16,8 +16,8 @@ In single-player mode, both keyboard layouts work.
 F1: instructions.                       F2: select GAME 1 / 2 / 3.
 F3: start at bridge 1->5->20->50->1. F4: color/B&W.
 F5 / F8: Player 1 / 2 fire&forget or guided missiles.
-F9: sound on/off.
-F10: when unmuted, PSG -> OPL2 -> PCM (if supported); label for 5 seconds.
+F9: sound on/off; when enabling sound, label for 1 second.
+F10: when unmuted, PSG -> OPL2 -> PCM (if supported); label for 1 second.
 Space or Enter: fire / start.        P: pause.
 R: restart at selected bridge.       Escape: farewell screen, then exit.
 Two gamepads: D-pad or left stick, face buttons to fire,

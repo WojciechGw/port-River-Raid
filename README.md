@@ -45,16 +45,35 @@ pitch, and explosions have a low body rather than metallic percussion.
 Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
-The startup cover plays a 32-second, nine-voice OPL2 arrangement of the supplied
-`RiverRaid2.wav`, repeating while the cover is visible. It stops when the cover
-finishes fading out; the manual remains silent. The intro uses OPL2 regardless
-of the gameplay audio option, then restores the selected PSG/OPL2/PCM backend.
-The editable notes are in `src/intro-score.json`; the WAV is not embedded in
-the game. FM instruments approximate the recording's timbres.
+The startup cover plays the OPL2 melody and PCM drums from the firmware's
+`tests/gen/riverraid_rom_gen.py --bpm 140`. Its eight-bar loop lasts 13.696 seconds
+at the generator's actual tempo of 140.186916 BPM. It stops when the cover
+finishes fading out; the manual remains silent. The intro uses OPL2 plus PCM
+regardless of the gameplay audio option, then restores the selected backend.
+Firmware without PCM plays the OPL2 part alone. Notes and instruments are in
+`src/intro-score.json`; `assets/intro-drums.pcm` holds the generated percussion.
+To reimport: `python tools/import_intro.py path/to/riverraid_rom_gen.py --bpm 140`.
+
+Losing the last plane plays the OPL2 + PCM arrangement from
+`riverraid_gameover_rom_gen.py --bpm 200`, including its final slowdown and decay
+(6.704 seconds). GAME 1 triggers it when the player runs out of planes;
+GAME 2 and GAME 3 wait until both players run out. The jingle respects mute and
+restores the selected gameplay audio backend when finished.
+To reimport: `python tools/import_gameover.py path/to/riverraid_gameover_rom_gen.py --bpm 200`.
+
+Destroying a bridge while the HUD shows BRIDGE 5, 20 or 50 plays the OPL2 + PCM victory fanfare from
+`riverraid_victory_rom_gen.py --bpm 96` (11.648 seconds). It also awards one extra
+life to the current player in GAME 1/2, or to each player in GAME 3, including
+an eliminated player. The existing life limits apply. Muting sound does not
+disable the reward, and the regular score bonus remains independent.
+To reimport: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --name victory --bpm 96`.
+Normal builds use the checked-in assets and do not require the firmware checkout.
 
 GAME 3 DUO lets P1 and P2 fly together, with separate scores, fuel and lives.
 Each pilot can hold up to ten lives, shown as two rows of five plane icons
 beside their fuel gauge.
+Selecting GAME 3 already shows three planes and a full fuel gauge for each
+pilot, before starting the flight.
 P1 uses the keyboard; the first gamepad controls P2 (WASD/left Ctrl also work).
 Scrolling follows the average speed of the active planes. Each plane's throttle
 also changes its vertical position: a faster pilot gains distance over time,
@@ -90,8 +109,8 @@ Explicit `/pcm` reports an error if the firmware lacks PCM.
 Options are case insensitive; if several audio backends are supplied, the last one wins.
 Add `/v` (for example, `load riverraid.rp6502 /opl2 /v`) to show the sound
 icon and PSG/OPL/PCM label in the bottom-right corner below the scroller.
-Without `/v`, a crossed-out note appears when F9 has muted sound, and F10
-shows the selected backend for five seconds, aligned with the right screen
+Without `/v`, a crossed-out note appears when F9 has muted sound. Unmuting
+with F9 or switching with F10 shows the selected backend for one second, aligned with the right screen
 edge. The note moves to its left while the label is visible. F10 is ignored while muted.
 `/help` displays usage without opening the cover.
 In the emulator, put the game arguments after `--`:
@@ -128,8 +147,8 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |
-| F9 | Sound on / off (all sounds) |
-| F10 | When unmuted, cycle PSG → OPL2 → PCM → PSG; show PSG/OPL/PCM for 5 seconds; skip PCM if unsupported |
+| F9 | Sound on / off (all sounds); when enabling sound, show PSG/OPL/PCM for 1 second |
+| F10 | When unmuted, cycle PSG → OPL2 → PCM → PSG; show PSG/OPL/PCM for 1 second; skip PCM if unsupported |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |

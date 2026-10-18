@@ -5,7 +5,8 @@
 .macpack longbranch
 .importzp ptr1
 .export _show_cover, _show_outro, _show_manual
-.import _reset_tiles, intro_init, intro_tick, intro_stop, __INTRO_SCORE_SIZE__
+.import _reset_tiles, intro_init, intro_tick, intro_stop, intro_load
+.export boot_open, boot_close, boot_read_xram, boot_fd
 .export boot_scene
 .segment "SPLASH"
 
@@ -85,10 +86,7 @@ boot_show:
     sta _reset_tiles+256,y
     iny
     bne @overlay_hi
-    lda boot_scene
-    bne @no_score
-    boot_read $F100, __INTRO_SCORE_SIZE__
-@no_score:
+    jsr intro_load
     jsr boot_close
     ; State data must not look like an initialized game while the cover is up.
     boot_address RIA_ADDR0, $0080

@@ -116,7 +116,7 @@ def generate(source):
     live_labels = {re.match(r"(\w+):", c)[1] for _,c in selected if re.match(r"(\w+):", c)}
     live_labels.add("MainLoop")
     out += ['.include "longbranch.mac"', '.import _start_level, _ready',
-            '.import _duo_tick, _duo_call, _duo_dead, _player_y']
+            '.import _duo_tick, _duo_call, _duo_dead, _player_y, _victory_bridge']
     # All virtual hardware occupies reserved $0200-$02FF, away from cc65 ZP.
     native_io = {name: (0x200 + value if value < 0x100 else value) for name,value in VCS.items()}
     native_io["INPT4"] = 0x25C  # INPT4-$30 = $022C; player 2 is $022D.
@@ -168,6 +168,10 @@ def generate(source):
             if code != 'LDA    ScoreTab,Y':
                 raise ValueError('Review native extended score table hook')
             code = 'LDA port_ScoreTab,Y'
+        if number == 1569:
+            if code != 'INC    sectionEnd':
+                raise ValueError('Review native bridge destruction hook')
+            code += '\nJSR _victory_bridge'
         if number == 2133:
             out += ['LDA level', 'CMP #2', 'jcc port_original_enemy',
                     'LDA randomLo', 'AND #$18', 'jne port_original_enemy',

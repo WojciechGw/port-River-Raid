@@ -4,7 +4,29 @@ import re
 from pathlib import Path
 
 
+def run_life_hud_checks(case, sym, boot, output):
+    icons=['dump xram:0x0600 190']
+    help_roundtrip=['press f1','wait xram:0x00b0 2 120','release f1',
+        'wait xram:0x02a4 222 5','press space','run 3','release space',
+        'wait xram:0x0080 82 240','run 4']
+    for variant in (0,1):
+        select=boot+(['press f2','run 3','release f2','run 8'] if variant else [])
+        _,data=case(f'classic-selection-life-icons-game{variant+1}',select+icons+[
+            f'shot "{(output / f"game{variant+1}-selection-lives.png").as_posix()}"']+
+            help_roundtrip+icons+['press space','run 140','release space','run 4',
+                'press p','run 3','release p','run 3']+icons+[
+                'poke 0xc0 8','run 3']+icons+[
+                f'poke 0xc0 {sym["rr_Copyright0"]&255}','run 3']+icons)
+        for sprites,count in zip(data,(3,3,3,1,0)):
+            for i in range(9):
+                x,y,art,palette,size,options=struct.unpack_from('<hhHHBB',sprites,(i+9)*10)
+                assert y==(207 if i<count else -256), f'GAME {variant+1}: expected {count} life icons'
+                assert art==0x9c80 and size==0x11 and options==0x42
+                assert palette==(0x056c if variant else 0x0100)
+
+
 def run_help_checks(case, sym, boot, output):
+    run_life_hud_checks(case,sym,boot,output)
     # Use the editable artwork as the reference, so drawing a new note does
     # not require duplicating its pixels in this renderer integration check.
     graphics=(Path(__file__).resolve().parents[1] / 'src/graphics.h').read_text(encoding='utf-8')
@@ -58,7 +80,7 @@ def run_help_checks(case, sym, boot, output):
             toggle+text_dump+[
             f'shot "{(output / f"sound-status-off-game{variant+1}{suffix}.png").as_posix()}"',
             'mark']+opening+closing+['expect-same']+
-            cycle+text_dump+cycle+text_dump+cycle+toggle+text_dump+['mark']+
+            cycle+text_dump+cycle+text_dump+cycle+toggle+text_dump+['run 60','mark']+
             opening+closing+['expect-same']+text_dump+[
             'press f4','run 3','release f4','run 3','dump xram:0xbf80 4']+text_dump,
             rom_args=options)
@@ -67,7 +89,8 @@ def run_help_checks(case, sym, boot, output):
         assert data[1]==data[8]==bytes((0,0,255,255)), 'Status is not white on black'
         on=note+b'OPL ' if verbose else bytes(8)+b'    '
         off=muted+(b'OPL ' if verbose else b'    ')
-        assert data[2:8]==[on,off,off,off,on,on]
+        unmuted=(note if verbose else bytes(8))+b'OPL '
+        assert data[2:8]==[on,off,off,off,unmuted,on]
         assert data[9]==on
     snapshot = ["dump 0x80 128", "dump xram:0x0200 16",
                 "dump xram:0x0800 7680", "dump xram:0xa000 5920",

@@ -46,31 +46,26 @@ void psg_engine_apply(void);
 void psg_engine_stop(void);
 
 #pragma optimize (push, on)
-/* The SDK's optional argv allocator otherwise returns NULL. Arguments are
- * parsed before the cover/game reuse this 512-byte terrain working buffer. */
-extern uint8_t reset_tiles[512];
-void* __fastcall__ __argv_mem(unsigned bytes)
-{
-    return bytes<=512 ? reset_tiles : 0;
-}
+#pragma code-name(push, "STARTUP_AUDIO")
+#pragma rodata-name(push, "STARTUP_AUDIO")
+/* Replaced by the game-over player after argument parsing and startup fade. */
 uint8_t audio_options(int argc,char** argv)
 {
-    uint8_t i;
-    const char* option;
+    static const char* const options[]={"/auto","/psg","/opl2","/pcm","/v","/help","/?"};
+    uint8_t i,n;
     for (i=1;i<argc;++i) {
-        option=argv[i];
-        if (!stricmp(option,"/psg")) requested=AUDIO_PSG;
-        else if (!stricmp(option,"/opl2")) requested=AUDIO_OPL2;
-        else if (!stricmp(option,"/pcm")) requested=AUDIO_PCM;
-        else if (!stricmp(option,"/auto")) requested=AUDIO_AUTO;
-        else if (!stricmp(option,"/v")) sound_verbose=1;
+        for (n=0;n<7;++n) if (!stricmp(argv[i],options[n])) break;
+        if (n<4) requested=n;
+        else if (n==4) sound_verbose=1;
         else {
             puts("Usage: load riverraid.rp6502 [/auto | /psg | /opl2 | /pcm] [/v]");
-            return !stricmp(option,"/help") || !strcmp(option,"/?") ? 1 : 2;
+            return n<7 ? 1 : 2;
         }
     }
     return 0;
 }
+#pragma rodata-name(pop)
+#pragma code-name(pop)
 static void opl_write(uint8_t reg,uint8_t value)
 {
     RIA.step0=0; RIA.addr0=XRAM_OPL+reg;
@@ -268,6 +263,7 @@ static void opl_update(uint8_t flight,uint8_t native_engine)
 void audio_update(uint8_t paused,uint8_t demo)
 {
     uint8_t n,ctrl,divider,volume,shot,engine,muted,flight;
+    if (gameover_update()) return;
     muted=paused || demo || audio_muted;
     shot=G(0xfb);
     if (muted || G(0xc6) || (audio_backend==AUDIO_PCM && G(0xf8)==1)) shot_age=18;
@@ -300,6 +296,7 @@ void audio_update(uint8_t paused,uint8_t demo)
 }
 void audio_stop(void)
 {
+    gameover_stop();
     if (audio_backend==AUDIO_PCM) xreg(0,1,2,0xffff);
     else if (audio_backend==AUDIO_OPL2) xreg(0,1,1,0xffff);
     else {psg_engine_stop(); xram0_set(XRAM_PSG,0,64); xreg(0,1,0,0xffff);}
