@@ -69,6 +69,7 @@ void demo_splash_load(void);
 void demo_splash_present(void);
 void demo_splash_palette(void);
 void demo_splash_start(void);
+void demo_splash_cancel(void);
 extern uint8_t demo_splash_done,demo_splash_out;
 int sound_status_init(void);
 void sound_status_update(void);
@@ -1756,7 +1757,7 @@ int main(int argc,char** argv)
 #endif
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
-        if (changes&2) demo_splash_out=game_start_pending=0; /* F2 cancels a pending start. */
+        if (changes&2) {demo_splash_cancel(); game_start_pending=0;} /* F2 cancels the overlay sequence. */
         if ((changes&4) ||
             ((input&START) && !(previous_input&START)) ||
             ((ready || MODE==255) && (input&FIRE) && !(previous_input&FIRE))) {
@@ -1764,7 +1765,7 @@ int main(int argc,char** argv)
             game_start_pending=1;
             if (ready || MODE==255) {
                 demo_splash_start();
-            } else {G(0x282)&=~1; ready=0;}
+            } else {G(0x282)&=~1; ready=0; demo_splash_cancel();}
         }
         if (demo_splash_out && demo_splash_done) {
             demo_splash_out=0;

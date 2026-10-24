@@ -365,13 +365,30 @@ one final VSYNC displays it before returning to the console, even with Escape he
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
-The demo overlay comes from `assets/splash.bmp` (128x64, up to 256
-palette entries). `tools/make_demo_splash.py` packs two unscaled 64x64 8bpp
+The overlay uses `assets/splash_plane.bmp`, `splash_areyouready.bmp` and
+`splash_gameover.bmp` (128x64, up to 256 palette entries). CMake runs
+`tools/make_demo_splash.py` for each and packages `splash-plane.bin`,
+`splash-areyouready.bin` and `splash-gameover.bin`: 9216 bytes each, 27 KiB total.
+Each image has two unscaled 64x64 8bpp
 sprites at XRAM $6500 and $D600, resting at (200,4) and (264,4). The front
 sprite plane starts at scanline zero, displaying the entire image. Black
 is transparent. Entry starts immediately at X=320 and moves left by 2 pixels
 per live demo frame, reaching X=200 after 60 frames. A start request switches
 to 8 pixels per frame until X=-128; only then does actual play begin.
+The plane image is used for both slides; the ready image replaces it at rest.
+The final-life event starts a separate plane entry before the music mute test,
+for the sole player in GAME 1 or after both players run out in GAME 2/3.
+At X=200 it changes to GAME OVER and holds. The score terminator signals the
+actual end of the jingle; an active PCM score is never replaced by a wall-clock
+timeout. Muted or interrupted audio falls back to 403 unpaused frames from
+the final-life event (107264 samples at 16 kHz). After the hold, GAME OVER
+slides left intact, then a new plane enters and changes to ARE YOU READY.
+The native world may resume demo earlier, but cannot reset this sequence.
+Pause/F1 preserves the phase and silent fallback timer; F2/restart cancels it.
+At VSYNC, a changed image is read directly from ROM into both existing XRAM
+tiles and their color/mono palettes; descriptors stay visible throughout.
+The loader opens its own ROM file and saves/restores boot_fd, retaining the
+PCM stream's separate file position. F1 forcibly reloads the selected image.
 During departure, audio_update enables only the existing engine effect,
 using OPL2 or PCM according to the selected backend. Other demo effects stay
 muted. The music mixer admits this engine during demo; F9 OFF, pause, F1,

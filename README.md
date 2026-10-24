@@ -42,12 +42,19 @@ throttle-controlled volume to avoid pitched FM hum and beating.
 OPL2 uses nine channels to keep the engine playing
 alongside shots, blasts and fuel tones. Missiles descend in
 pitch, and explosions have a low body rather than metallic percussion.
-Attract mode slides `assets/splash.bmp` in from the right at its native 128x64
+Attract mode slides `assets/splash_plane.bmp` in from the right at its native 128x64
 size, using two 64x64 sprites with transparent black. The image moves at
-2 pixels per frame to X=200, Y=4.
-Starting play slides it off the left edge at 8 pixels per frame (about
+2 pixels per frame to X=200, Y=4, then replaces it with `splash_areyouready.bmp`.
+Starting play restores the plane and slides it off the left edge at 8 pixels per frame (about
 0.68 seconds from rest), accompanied by the engine effect while demo music
 continues. F9 OFF and pause silence the engine; SFX keeps it enabled.
+When GAME 1 runs out of planes, or both players run out in GAME 2/3, the plane
+flies in and changes to `splash_gameover.bmp`. It waits for the game-over tune
+to finish, then leaves with the GAME OVER text. Only afterwards does a new
+plane enter and change to ARE YOU READY. With music muted or interrupted,
+the sequence uses the tune's nominal 6.7-second duration; pause/F1 freezes it.
+All three images are packaged in the ROM and loaded directly into the same
+XRAM buffers without hiding the sprites during image replacement.
 Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 

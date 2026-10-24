@@ -21,6 +21,8 @@ def run_opl_only_checks(case,sym,boot,fixture,resume,start,build,assets):
     run_help_fade_checks(case,sym,boot,build/'checks')
     from demo_splash_checks import run_demo_splash_checks
     run_demo_splash_checks(case,sym,boot,build/'checks',assets)
+    from splash_scene_checks import run_splash_scene_checks
+    run_splash_scene_checks(case,sym,boot,fixture,resume,assets,False,build/'checks')
     check_opl_crash(case,sym,fixture,resume,'opl-only-plane-crash')
     from enemy_audio_checks import run_enemy_audio_checks
     run_enemy_audio_checks(case,sym,fixture,resume,'opl-only')

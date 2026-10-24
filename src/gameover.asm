@@ -9,7 +9,7 @@
 .importzp ptr1
 .import boot_open, boot_close, boot_read_xram
 .import _audio_stop, _audio_init, _audio_muted, _paused, _ready, _duo_players
-.import _rr_Copyright0, _reset_tiles
+.import _rr_Copyright0, _reset_tiles, _demo_splash_gameover, _demo_splash_music_done
 .export ___argv_mem
 .import __STARTUP_AUDIO_RUN__, __GAMEOVER_SIZE__
 .import music_enable, music_fallback_load, music_page
@@ -182,6 +182,7 @@ update:
     beq @playing
     cmp #0
     bne @playing
+    jsr _demo_splash_gameover  ; Visual event is independent of F9/music.
     lda _audio_muted
     and #1
     ora _paused
@@ -297,6 +298,14 @@ finish:
     bra idle
 
 .segment "MUSIC"
+sequence_end:
+    lda kind
+    bne :+
+    lda #1
+    sta _demo_splash_music_done
+:
+    jmp finish
+
 start:
     sta kind
     jsr _audio_stop
@@ -419,7 +428,7 @@ sequence:
     lda RIA_RW1
     sta duration+1
     ora duration
-    jeq finish
+    jeq sequence_end
     clc
     lda remaining
     adc duration

@@ -72,12 +72,16 @@ else()
         DEPENDS src/graphics.h tools/pack_mountains.py
         VERBATIM)
     set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
-    set(RIVER_DEMO_SPLASH ${CMAKE_CURRENT_BINARY_DIR}/demo_splash.bin)
-    add_custom_command(OUTPUT ${RIVER_DEMO_SPLASH}
-        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_splash.py
-            ${CMAKE_CURRENT_SOURCE_DIR}/assets/splash.bmp ${RIVER_DEMO_SPLASH}
-        DEPENDS assets/splash.bmp tools/make_demo_splash.py
-        VERBATIM)
+    set(RIVER_DEMO_SPLASH)
+    foreach(scene plane areyouready gameover)
+        set(sprite_asset ${CMAKE_CURRENT_BINARY_DIR}/splash-${scene}.bin)
+        list(APPEND RIVER_DEMO_SPLASH ${sprite_asset})
+        add_custom_command(OUTPUT ${sprite_asset}
+            COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_splash.py
+                ${CMAKE_CURRENT_SOURCE_DIR}/assets/splash_${scene}.bmp ${sprite_asset}
+            DEPENDS assets/splash_${scene}.bmp tools/make_demo_splash.py
+            VERBATIM)
+    endforeach()
     set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
     set(RIVER_DUO_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/duo_demo_footer.bin)
     set(RIVER_COVER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/cover.bin)
@@ -182,7 +186,9 @@ else()
     rp6502_asset(riverraid outro.bin ${RIVER_OUTRO_IMAGE})
     rp6502_asset(riverraid outro-fade.bin ${RIVER_OUTRO_FADES})
     rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
-    rp6502_asset(riverraid demo-splash.bin ${RIVER_DEMO_SPLASH})
+    foreach(scene plane areyouready gameover)
+        rp6502_asset(riverraid splash-${scene}.bin ${CMAKE_CURRENT_BINARY_DIR}/splash-${scene}.bin)
+    endforeach()
     rp6502_asset(riverraid duo-demo-footer.bin ${RIVER_DUO_FOOTER_IMAGE})
     # Cover helpers and tank extensions share CPU RAM above the reference ROM.
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)

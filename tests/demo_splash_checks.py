@@ -4,35 +4,40 @@ from pathlib import Path
 
 
 def run_demo_splash_checks(case,sym,boot,output,assets):
-    source=Path(__file__).resolve().parents[1]/'assets/splash.bmp'
-    bmp=source.read_bytes()
-    offset=struct.unpack_from('<I',bmp,10)[0]
-    height=struct.unpack_from('<i',bmp,22)[0]
-    rows=[bmp[offset+y*128:offset+(y+1)*128] for y in range(64)]
-    if height>0: rows.reverse()
-    asset=assets['demo-splash.bin']
-    assert len(asset)==9216
-    assert b''.join(asset[y*64:(y+1)*64]+asset[4096+y*64:4096+(y+1)*64]
-                    for y in range(64))==b''.join(rows), 'Splash pixels were scaled or cropped'
-    palettes=(asset[8192:8704],asset[8704:9216])
-    assert palettes[0][:2]==palettes[1][:2]==b'\0\0', 'Black background must be transparent'
-    # Compare all 256 entries to the BMP, including indices above the old
-    # 64-color limit and the transparency bits of the monochrome version.
-    dib=struct.unpack_from('<I',bmp,14)[0]
-    count=struct.unpack_from('<I',bmp,46)[0] or 256
-    for index,(color,mono) in enumerate(zip(struct.unpack('<256H',palettes[0]),
-                                           struct.unpack('<256H',palettes[1]))):
-        b,g,r=bmp[14+dib+4*index:17+dib+4*index] if index<count else (0,0,0)
-        alpha=32 if r or g or b else 0
-        r,g,b=r>>3,g>>3,b>>3
-        gray=(r+2*g+b)//4
-        assert color==(b<<11)|(g<<6)|alpha|r, index
-        assert mono==(gray<<11)|(gray<<6)|alpha|gray, index
+    scenes={}
+    assert 'demo-splash.bin' not in assets
+    for scene in ('plane','areyouready','gameover'):
+        source=Path(__file__).resolve().parents[1]/f'assets/splash_{scene}.bmp'
+        bmp=source.read_bytes()
+        offset=struct.unpack_from('<I',bmp,10)[0]
+        height=struct.unpack_from('<i',bmp,22)[0]
+        rows=[bmp[offset+y*128:offset+(y+1)*128] for y in range(64)]
+        if height>0: rows.reverse()
+        asset=assets[f'splash-{scene}.bin']
+        assert len(asset)==9216
+        assert b''.join(asset[y*64:(y+1)*64]+asset[4096+y*64:4096+(y+1)*64]
+                        for y in range(64))==b''.join(rows), 'Splash pixels were scaled or cropped'
+        palettes=(asset[8192:8704],asset[8704:9216])
+        assert palettes[0][:2]==palettes[1][:2]==b'\0\0', 'Black background must be transparent'
+        # Compare all 256 entries to the BMP, including indices above the old
+        # 64-color limit and the transparency bits of the monochrome version.
+        dib=struct.unpack_from('<I',bmp,14)[0]
+        count=struct.unpack_from('<I',bmp,46)[0] or 256
+        for index,(color,mono) in enumerate(zip(struct.unpack('<256H',palettes[0]),
+                                               struct.unpack('<256H',palettes[1]))):
+            b,g,r=bmp[14+dib+4*index:17+dib+4*index] if index<count else (0,0,0)
+            alpha=32 if r or g or b else 0
+            r,g,b=r>>3,g>>3,b>>3
+            gray=(r+2*g+b)//4
+            assert color==(b<<11)|(g<<6)|alpha|r, index
+            assert mono==(gray<<11)|(gray<<6)|alpha|gray, index
+        scenes[scene]=(asset,palettes)
+    asset,palettes=scenes['areyouready']
     opening=['press f1','wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5']
     closing=['press z','run 3','release z','wait xram:0x0080 82 320','run 4']
     frame=['dump xram:0x7500 40','dump xram:0x7580 512','dump xram:0x03e6 20']
 
-    def check_frame(data,visible,mono=False,x=None):
+    def check_frame(data,visible,mono=False,x=None,scene=None):
         descriptors,palette,jets=data
         assert descriptors[:20]==jets, 'Overlay list lost either player sprite'
         if x is None: x=200 if visible else -128
@@ -40,7 +45,8 @@ def run_demo_splash_checks(case,sym,boot,output,assets):
             actual=struct.unpack_from('<hhHHBB',descriptors,20+i*10)
             assert actual==(x+64*i,4 if visible else -256,
                             0x6500 if i==0 else 0xd600,0x7580,0xff,3), actual
-        assert palette==palettes[mono], 'Sliding splash faded or F4 failed'
+        if scene is None: scene='areyouready' if visible else 'plane'
+        assert palette==scenes[scene][1][mono], 'Sliding splash faded or F4 failed'
 
     xpos=f'0x{sym["demo_splash_x"]:04x}'
     leaving=f'0x{sym["demo_splash_out"]:04x}'
@@ -62,7 +68,7 @@ def run_demo_splash_checks(case,sym,boot,output,assets):
     # Synchronize on published positions instead of sampling a descriptor
     # while the CPU is still preparing the next frame's palette/HUD.
     for i,x in enumerate(entering+exiting):
-        check_frame(data[i*3:i*3+3],x>-128,x=x)
+        check_frame(data[i*3:i*3+3],x>-128,x=x,scene='plane')
 
     _,data=case('demo-splash-slide-pause-f1',boot+restart+['run 20',
         'press p','run 3','release p','run 3']+snapshot+['run 150']+snapshot+
@@ -77,7 +83,7 @@ def run_demo_splash_checks(case,sym,boot,output,assets):
 
     _,data=case('demo-splash-slide-monochrome',boot+restart+['run 20',
         'press f4','run 3','release f4','run 3','press p','run 3','release p','run 3']+snapshot)
-    assert data[1]==palettes[1] and 200<struct.unpack('<h',data[0])[0]<320, 'F4 changed the slide or palette'
+    assert data[1]==scenes['plane'][1][1] and 200<struct.unpack('<h',data[0])[0]<320, 'F4 changed the slide or palette'
 
     case('demo-splash-f2-cancels-start',boot+['run 10','press space',
         f'wait {leaving} 1 3','release space','run 5']+restart+[

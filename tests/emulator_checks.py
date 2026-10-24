@@ -465,6 +465,7 @@ def main():
     parser.add_argument("--missiles-only", action="store_true")
     parser.add_argument("--start-controls-only", action="store_true", help="Check starting without firing")
     parser.add_argument("--splash-audio-only", action="store_true", help="Check the departing splash engine")
+    parser.add_argument("--splash-scenes-only", action="store_true", help="Check scene swaps and final-life graphics")
     parser.add_argument("--cpb", action="store_true", help="Emulate PICO-SRAM-BANKED registers")
     args = parser.parse_args()
     build = args.build.resolve()
@@ -540,6 +541,11 @@ def main():
             run_enemy_audio_checks(case,sym,legacy+fixture,resume,'enemy-legacy-opl')
             run_enemy_audio_checks(case,sym,fixture,resume,'enemy-pcm',pcm=True)
         print(f"All {count} enemy audio checks passed.",flush=True)
+        return
+    if args.splash_scenes_only:
+        from splash_scene_checks import run_splash_scene_checks
+        run_splash_scene_checks(case,sym,boot,fixture,resume,dict(load_image.assets),pcm_build,output)
+        print(f"All {count} splash scene checks passed.",flush=True)
         return
     if args.splash_audio_only:
         from splash_audio_checks import run_splash_audio_checks

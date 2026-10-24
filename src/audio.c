@@ -34,7 +34,7 @@ static uint8_t synth_shot_volume;
 static uint8_t enemy_age=18,enemy_helicopter,enemy_volume,enemy_pending;
 static uint16_t enemy_step;
 static const uint8_t engine_volume[4]={4,4,7,5};
-extern uint8_t demo_splash_out,demo_splash_done;
+extern uint8_t demo_splash_out,demo_splash_done,demo_splash_gameover_phase;
 static const uint8_t opl_slot[9]={0,1,2,8,9,10,16,17,18};
 uint8_t opl_a[9],opl_b[9],opl_volume[9];
 /* OPL 0..3: engine, 4..6: blast, 7: missile, 8: enemy shot / fuel tone. */
@@ -258,7 +258,7 @@ void audio_update(uint8_t paused,uint8_t demo)
     }
     /* Only the departing splash gets an engine in demo. Keep native demo
      * shots/blasts muted, and use the normal engine synth on either backend. */
-    if (demo && demo_splash_out && !demo_splash_done && !paused &&
+    if ((demo || demo_splash_gameover_phase==3) && demo_splash_out && !demo_splash_done && !paused &&
         !(audio_muted&AUDIO_MUTE_EFFECTS)) {
         flight=engine=1;
         pcm_tone[0]=0;

@@ -10,6 +10,15 @@ paletę mono przy F4 i krótkie naciśnięcie Start jeszcze podczas wjazdu.
 Zestaw działa z `--build build/cc65/release-pcm`. Podglądy zapisuje jako
 `checks/demo-splash-game1.png` (analogicznie dla GAME 2 i 3).
 
+`python tests/emulator_checks.py --splash-scenes-only` sprawdza podmianę
+obrazów i palet po utracie ostatniego życia w GAME 1 oraz wszystkich żyć obu
+graczy w GAME 2/3, również przy F9 OFF. Obejmuje F1, mono, restart i powrót
+do demo. Sprawdza pełną sekwencję: wjazd samolotu, napis GAME OVER,
+oczekiwanie do końca melodii, odlot z napisem i nowy wjazd z ARE YOU READY.
+Sprawdza też wyciszenie oraz oczekiwanie przy zatrzymanym zegarze PCM.
+Wersja PCM dodatkowo porównuje próbki muzyki po podmianie grafiki,
+aby wykryć zmianę deskryptora lub pozycji pliku strumienia.
+
 `python tests/emulator_checks.py --splash-audio-only` sprawdza silnik podczas
 wyjazdu splasha, F9, pauzę/F1 i anulowanie przez F2. Z wersją PCM sprawdza
 również próbki silnika, miksowanie z muzyką i zastępczy wariant OPL2 bez PCM.
