@@ -4,12 +4,14 @@
 .macpack longbranch
 .import boot_open, boot_close, boot_read_xram
 .import _audio_backend, _ready, _paused
+.import _demo_splash_out, _demo_splash_done
 .import _gameover_active, _jingle_kind
 .import _rr_Zero
 .export music_enable, music_fallback_load, _music_effects
 .export _music_synth, music_page
 .if RIVER_PCM
 .export music_probe, _music_pcm_probe, music_mix_pcm, music_fx_read
+.export _music_fx_read := music_fx_read
 .endif
 .segment "MUSIC"
 .assert _rr_Zero = $CB00, lderror, "Review reclaimed reference code: first table moved"
@@ -102,7 +104,12 @@ music_mix_pcm:
     cpx #2
     jne @done
     ldx _ready
+    beq @mix
+    ldx _demo_splash_out
+    jeq @done
+    ldx _demo_splash_done
     jne @done
+@mix:
     clc
     adc #$ca
     sta RIA_ADDR0+1
@@ -176,8 +183,9 @@ _music_effects:
     lda _jingle_kind
     cmp #2
     jne @done
-    lda _ready
-    ora _paused
+    ; audio_update mutes demo effects except the departing splash engine.
+    ; Copy silent voices too, so F2/cancel cannot leave its engine keyed on.
+    lda _paused
     jne @done
     lda _audio_backend
     cmp #2

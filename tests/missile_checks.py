@@ -35,7 +35,7 @@ def run_missile_checks(case, sym, boot, fixture, resume):
 
     select = boot + ["press f2", "run 3", "release f2", "run 3",
                      "press f2", "run 3", "release f2", "run 8"]
-    duo = select + ["press space", "run 140", "release space", "run 4"] + pause
+    duo = select + ["press space", "run 136", "release space", "run 4"] + pause
     duo += [poke(0xa0, [255]*6), poke(0x8e, [0]*6), poke(0xc6, 0),
             poke(sym["duo_gap"], [0, 0]), poke(sym["river1"], [0]*192),
             poke(sym["river2"], [0]*192), poke(sym["river_left"], [0]*192),

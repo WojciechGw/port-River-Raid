@@ -10,7 +10,7 @@ _game_fade_read:
     ldx RIA_RW0
     rts
 
-; Five palette ranges, 288 RGB555 words. No sprite/config/bitmap bytes change.
+; Six palette ranges, 544 RGB555 words. No sprite/config/bitmap bytes change.
 _game_fade_capture:
     lda #$00
     sta RIA_ADDR1
@@ -27,15 +27,15 @@ _game_fade_capture:
     dey
     bne @copy
     inx
-    cpx #5
+    cpx #6
     bne @range
     rts
 
-; About 0.8 ms at 8 MHz: complete before the first playfield scanline (Y=21).
+; Publish before the first playfield scanline (Y=21) at 8 MHz.
 _game_fade_publish:
-    lda #$00
+    lda #$80
     sta RIA_ADDR1
-    lda #$d3
+    lda #$7b
     sta RIA_ADDR1+1
     ldx #0
 @range:
@@ -48,7 +48,7 @@ _game_fade_publish:
     dey
     bne @copy
     inx
-    cpx #5
+    cpx #6
     bne @range
     rts
 
@@ -61,6 +61,6 @@ fade_address:
     rts
 
 .segment "RODATA"
-fade_low:   .byte $00,$00,$00,$20,$80
-fade_high:  .byte $01,$04,$07,$07,$bf
-fade_words: .byte 16,0,7,7,2
+fade_low:   .byte $00,$00,$00,$20,$80,$80
+fade_high:  .byte $01,$04,$07,$07,$bf,$75
+fade_words: .byte 16,0,7,7,2,0

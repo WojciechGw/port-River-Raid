@@ -42,7 +42,13 @@ throttle-controlled volume to avoid pitched FM hum and beating.
 OPL2 uses nine channels to keep the engine playing
 alongside shots, blasts and fuel tones. Missiles descend in
 pitch, and explosions have a low body rather than metallic percussion.
-Attract mode plays the flight arrangement. Colors and audio remain approximations. Compatibility and limitations
+Attract mode slides `assets/splash.bmp` in from the right at its native 128x64
+size, using two 64x64 sprites with transparent black. The image moves at
+2 pixels per frame to X=200, Y=4.
+Starting play slides it off the left edge at 8 pixels per frame (about
+0.68 seconds from rest), accompanied by the engine effect while demo music
+continues. F9 OFF and pause silence the engine; SFX keeps it enabled.
+Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
 The music is based on the OPL2 melody and PCM drums from the firmware's
@@ -53,7 +59,7 @@ quieter variation of the same theme, with syncopated bass, an alternating lead
 register and answering arpeggios. It keeps the same tempo and loop length.
 `tools/make_music.py` builds this arrangement and its percussion from the source
 score. Engine, shots, explosions and fuel warnings continue alongside it.
-On exit, both OPL2 and PCM fade out with the farewell picture. F9 mute also
+On exit, both OPL2 and PCM fade out with the farewell picture. F9 music mute also
 applies to music. In the PCM build, music uses OPL2 plus PCM when the firmware
 supports PCM, regardless of the gameplay option. The default OPL2 build plays
 both melody and synthesized percussion through OPL2. The same arrangement is
@@ -117,10 +123,14 @@ No parameter selects OPL2. `/auto` selects PCM when supported, otherwise OPL2.
 Explicit `/pcm` reports an error if the firmware lacks PCM.
 Options are case insensitive; if several audio backends are supplied, the last one wins.
 Add `/v` (for example, `load riverraid.rp6502 /opl2 /v`) to show the sound
-icon and OPL/PCM label in the bottom-right corner below the scroller.
-Without `/v`, a crossed-out note appears when F9 has muted sound. Unmuting
-with F9 or switching with F10 shows the selected backend for one second, aligned with the right screen
-edge. The note moves to its left while the label is visible. F10 is ignored while muted.
+icon in the bottom-right corner below the scroller. The full PCM build also
+shows the OPL/PCM label; the OPL2-only build never displays a backend label.
+F9 cycles through all sound, effects only (`SFX`),
+and silence (`OFF`), then restores all sound. These status labels remain
+visible without `/v`. In the full build, restoring all sound with F9 or
+switching with F10 shows the backend for one second, aligned with the right
+screen edge. The note moves to its left while a label is visible.
+F10 is ignored only in the fully muted state.
 `/help` displays usage without opening the cover.
 In the emulator, put the game arguments after `--`:
 
@@ -138,7 +148,8 @@ The artifact name `riverraid` retains the project's existing target name.
 The default `cc65/Release` and `cc65/Debug` presets set `RIVER_PCM=OFF`.
 Their ROM omits PCM samples, hybrid scores and PCM playback/mixing code.
 F10 has no action and is omitted from help and the `assets/manualOPL.bmp`
-keyboard screen. F9 still mutes all sound. `/auto` and `/opl2` select OPL2;
+keyboard screen. F9 offers the same three sound states, without showing an OPL label.
+`/auto` and `/opl2` select OPL2;
 `/pcm` is rejected.
 
 To build the full OPL2 + PCM version in a separate directory:
@@ -170,14 +181,14 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | Arrow keys | Player 1: movement; Up accelerates, Down slows down |
 | WASD, left Ctrl | Player 2: movement and firing; also control player 1 in single-player games |
 | Space or Enter | Fire; start a game or restart after game over |
-| F1 | Instructions (any key returns to the game) |
+| F1 | Instructions (any key returns with a one-second fade-in; the game stays frozen until it finishes) |
 | F2 | SELECT: GAME 1 solo, GAME 2 alternating, GAME 3 DUO |
 | F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
 | F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |
-| F9 | Sound on / off (all sounds); when enabling sound, show OPL/PCM for 1 second |
-| F10 | When unmuted, switch OPL2 ↔ PCM; show OPL/PCM for 1 second; stay on OPL2 if PCM is unsupported |
+| F9 | All sound → effects only → mute → all sound |
+| F10 | Unless fully muted, switch OPL2 ↔ PCM; show OPL/PCM for 1 second; stay on OPL2 if PCM is unsupported |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |

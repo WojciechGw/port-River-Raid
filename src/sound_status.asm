@@ -3,6 +3,7 @@
 .include "rp6502.inc"
 .export _sound_status_init, _sound_status_update
 .export _sound_status_notify, _sound_status_tick
+.export _sound_status_f9
 .import _audio_muted, _audio_backend, _sound_icons, _sound_verbose
 SOUND_CONFIG = $0220
 SOUND_ICON_CONFIG = $0230
@@ -65,18 +66,44 @@ sound_args:
     .byte 1,0,1, 0,3, 0,0, >SOUND_ICON_CONFIG,<SOUND_ICON_CONFIG, 0,1, 0,SOUND_ICON_Y, 0,SOUND_ICON_Y+8
 
 .segment "CODE"
+; Category masks cycle 0=all -> 1=effects only -> 3=silent -> 0.
+_sound_status_f9:
+    lda _audio_muted
+    cmp #3
+    bne @next
+    lda #0
+    bra @store
+@next:
+    asl a
+    inc a
+@store:
+    sta _audio_muted
+    stz sound_notice
+    cmp #0
+    bne @done
+.if RIVER_PCM
+    lda #60
+    sta sound_notice
+.endif
+@done:
+    rts
+
 ; Count all 60 Hz display frames, including pause and attract mode.
 _sound_status_notify:
+.if RIVER_PCM
     lda #<60
     sta sound_notice
+.endif
     rts
 _sound_status_tick:
+.if RIVER_PCM
     lda sound_notice
     beq @done
     dec sound_notice
     lda sound_notice
     beq _sound_status_update
 @done:
+.endif
     rts
 
 _sound_status_update:
@@ -88,8 +115,11 @@ _sound_status_update:
     sta RIA_ADDR0
     lda #>SOUND_ICON_CONFIG
     sta RIA_ADDR0+1
-    lda _sound_verbose
+    lda _audio_muted
+.if RIVER_PCM
+    ora _sound_verbose
     ora sound_notice
+.endif
     beq @right
     lda #<280
     bra @position
@@ -100,6 +130,7 @@ _sound_status_update:
     lda #<SOUND_ICON
     sta RIA_ADDR0
     lda _audio_muted
+    and #1                   ; Cross the note when music is disabled.
     asl a
     asl a
     asl a
@@ -119,13 +150,23 @@ _sound_status_update:
     dex
     bne @icon
     ; Text follows the icon in XRAM; continue through the same port.
+.if RIVER_PCM
+    lda sound_notice
+    bne @backend_index
+.endif
+    lda _audio_muted
+    bne @text_index
+.if RIVER_PCM
     lda _sound_verbose
-    ora sound_notice
     beq @text_index
+@backend_index:
     lda _audio_backend
-    asl a
-    asl a
+    clc
+    adc #2
+.endif
 @text_index:
+    asl a
+    asl a
     tay
     ldx #4
 @backend:
@@ -135,7 +176,7 @@ _sound_status_update:
     dex
     bne @backend
     rts
-sound_backends: .byte "    ","    ","OPL "
+sound_backends: .byte "    ","SFX ","    ","OFF "
 .if RIVER_PCM
-    .byte "PCM "
+    .byte "OPL ","PCM "
 .endif

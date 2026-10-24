@@ -50,7 +50,13 @@ _Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= XRAM_INTRO_SCORE, "Help bac
 /* Startup/F1 return fade: level 0 black .. 32 full, then VSYNC. */
 #define XRAM_GAME_FADE_LEVEL 0x00B2
 #define XRAM_GAME_FADE_SOURCE 0xD000
-#define XRAM_GAME_FADE_STAGING 0xD300
+#define XRAM_GAME_FADE_STAGING 0x7B80
+#define XRAM_DEMO_SPLASH_LEFT 0x6500
+#define XRAM_DEMO_SPLASH_RIGHT 0xD600
+#define XRAM_FRONT_SPRITES 0x7500
+#define XRAM_DEMO_SPLASH_PALETTE 0x7580
+#define XRAM_DEMO_SPLASH_COLORS 0x7780
+#define GAME_FADE_WORDS 544
 /* Cover/manual/outro text; these regions hold terrain during gameplay. */
 #define XRAM_COVER_PROMPT_CONFIG 0x02A0
 #define XRAM_COVER_PROMPT_IMAGE 0x0800
@@ -69,8 +75,7 @@ _Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= XRAM_INTRO_SCORE, "Help bac
 _Static_assert(XRAM_PCM + 8 + 2048 <= XRAM_MUSIC_SYNTH, "Effects overlap music");
 _Static_assert(XRAM_MUSIC_PCM + 8 + 1024 <= XRAM_GAME_FADE_SOURCE, "Music overlaps fade");
 _Static_assert(XRAM_PCM + 64 + 2048 <= XRAM_GAME_FADE_SOURCE, "Fade overlaps audio");
-_Static_assert(XRAM_GAME_FADE_SOURCE + 576 <= XRAM_GAME_FADE_STAGING, "Fade buffers overlap");
-_Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow");
+_Static_assert(XRAM_GAME_FADE_SOURCE + GAME_FADE_WORDS*2 <= XRAM_DEMO_SPLASH_RIGHT, "Fade source overlaps splash");
 #define XRAM_TERRAIN_CONFIG 0x0200
 #define XRAM_SOUND_CONFIG 0x0220
 #define XRAM_SOUND_ICON_CONFIG 0x0230
@@ -101,6 +106,14 @@ _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow")
 #define XRAM_DUO_JETS 0x6300
 #define XRAM_DUO_LIFE_SPRITES 0x6400
 #define DUO_LIFE_SPRITE_COUNT 20
+_Static_assert(XRAM_DUO_LIFE_SPRITES + DUO_LIFE_SPRITE_COUNT*10 <= XRAM_DEMO_SPLASH_LEFT, "DUO lives overlap splash");
+_Static_assert(XRAM_DEMO_SPLASH_LEFT + 4096 <= XRAM_FRONT_SPRITES, "Splash overlaps front sprites");
+_Static_assert(XRAM_FRONT_SPRITES + 4*10 <= XRAM_DEMO_SPLASH_PALETTE, "Front sprites overlap palette");
+_Static_assert(XRAM_DEMO_SPLASH_PALETTE + 512 <= XRAM_DEMO_SPLASH_COLORS, "Splash palettes overlap");
+_Static_assert(XRAM_DEMO_SPLASH_COLORS + 1024 <= XRAM_GAME_FADE_STAGING, "Splash colors overlap fade staging");
+_Static_assert(XRAM_GAME_FADE_STAGING + GAME_FADE_WORDS*2 <= XRAM_IMAGES, "Fade staging overlaps objects");
+/* E800 is the one-time game-over installation scratch, after video setup. */
+_Static_assert(XRAM_DEMO_SPLASH_RIGHT + 4096 <= 0xE800, "Splash overlaps installation scratch");
 /* Two packed duo_player_t snapshots, published with the normal diagnostics. */
 #define XRAM_DUO_STATE 0x00C0
 #define XRAM_HUD_BITMAP_CONFIG 0x0240

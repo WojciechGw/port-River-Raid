@@ -72,6 +72,12 @@ else()
         DEPENDS src/graphics.h tools/pack_mountains.py
         VERBATIM)
     set(RIVER_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.bin)
+    set(RIVER_DEMO_SPLASH ${CMAKE_CURRENT_BINARY_DIR}/demo_splash.bin)
+    add_custom_command(OUTPUT ${RIVER_DEMO_SPLASH}
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/make_demo_splash.py
+            ${CMAKE_CURRENT_SOURCE_DIR}/assets/splash.bmp ${RIVER_DEMO_SPLASH}
+        DEPENDS assets/splash.bmp tools/make_demo_splash.py
+        VERBATIM)
     set(RIVER_FOOTER_HEADER ${CMAKE_CURRENT_BINARY_DIR}/demo_footer.h)
     set(RIVER_DUO_FOOTER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/duo_demo_footer.bin)
     set(RIVER_COVER_IMAGE ${CMAKE_CURRENT_BINARY_DIR}/cover.bin)
@@ -111,9 +117,9 @@ else()
         DEPENDS original/riverraid.asm tools/port_original.py
         VERBATIM)
     add_executable(riverraid
-        src/riverraid.asm src/duo.asm src/cover.asm src/intro.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/sound_status.asm src/demo_footer.asm ${RIVER_CORE}
+        src/riverraid.asm src/duo.asm src/cover.asm src/intro.asm src/fade.c src/fade.asm src/main.c src/audio.c src/audio.asm src/sound_status.asm src/demo_footer.asm src/demo_splash.asm ${RIVER_CORE}
         ${RIVER_INTRO_SCORE} ${RIVER_GAMEOVER_SCORE} ${RIVER_VICTORY_SCORE} src/gameover.asm src/music.asm ${RIVER_MUSIC_ASSETS}
-        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS})
+        ${RIVER_FOOTER_HEADER} ${RIVER_COVER_INCLUDE} ${RIVER_MOUNTAINS} ${RIVER_SOUND_ICONS} ${RIVER_DEMO_SPLASH})
     target_link_options(riverraid PRIVATE -C ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
     set_property(TARGET riverraid APPEND PROPERTY LINK_DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/src/riverraid.cfg)
@@ -140,6 +146,8 @@ else()
         string(REPLACE "Only /pcm requires the PCM firmware extension. /help shows usage."
             "/auto and /opl2 select OPL2. /help shows usage." RIVER_HELP "${RIVER_HELP}")
         string(REGEX REPLACE "F10:[^\n]*\n" "" RIVER_HELP "${RIVER_HELP}")
+        string(REPLACE "/v always shows the sound icon and backend below the scroller."
+            "/v always shows the sound icon below the scroller." RIVER_HELP "${RIVER_HELP}")
     endif()
     file(CONFIGURE OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/help.txt CONTENT "${RIVER_HELP}" @ONLY)
     rp6502_asset(riverraid help ${CMAKE_CURRENT_BINARY_DIR}/help.txt)
@@ -174,6 +182,7 @@ else()
     rp6502_asset(riverraid outro.bin ${RIVER_OUTRO_IMAGE})
     rp6502_asset(riverraid outro-fade.bin ${RIVER_OUTRO_FADES})
     rp6502_asset(riverraid demo-footer.bin ${RIVER_FOOTER_IMAGE})
+    rp6502_asset(riverraid demo-splash.bin ${RIVER_DEMO_SPLASH})
     rp6502_asset(riverraid duo-demo-footer.bin ${RIVER_DUO_FOOTER_IMAGE})
     # Cover helpers and tank extensions share CPU RAM above the reference ROM.
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.splash)

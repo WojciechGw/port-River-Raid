@@ -135,7 +135,7 @@ def run_bridge_tank_checks(case, sym, fixture, resume):
         "press p","run 3","release p","run 3"]+snapshot+[
         "release down","press f1","wait xram:0x0080 0 10","wait xram:0x00b0 2 120",
         "release f1","wait xram:0x02a4 222 5","press space","run 3",
-        "release space","wait xram:0x0080 82 240","run 3"]+snapshot)
+        "release space","wait xram:0x0080 82 320","run 3"]+snapshot)
     assert data[:2]==data[2:], "F1 changed the survivor's shot"
 
     for x,direction,facing in ((47,1,0),(104,0,1)):

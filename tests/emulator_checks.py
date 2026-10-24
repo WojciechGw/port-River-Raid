@@ -448,6 +448,9 @@ def main():
     parser.add_argument("--build", type=Path, default=ROOT / "build/cc65/release")
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
+    parser.add_argument("--enemy-audio-only",action="store_true",help="Check tank and helicopter firing audio")
+    parser.add_argument("--sound-modes-only",action="store_true",help="Check the three F9 sound states")
+    parser.add_argument("--demo-splash-only",action="store_true",help="Check sliding demo sprites and F1 restoration")
     parser.add_argument("--intro-only",action="store_true")
     parser.add_argument("--music-only",action="store_true")
     parser.add_argument("--opl-only",action="store_true",help="Check a RIVER_PCM=OFF build")
@@ -460,6 +463,8 @@ def main():
     parser.add_argument("--footer-only",action="store_true")
     parser.add_argument("--bridge-tanks-only",action="store_true")
     parser.add_argument("--missiles-only", action="store_true")
+    parser.add_argument("--start-controls-only", action="store_true", help="Check starting without firing")
+    parser.add_argument("--splash-audio-only", action="store_true", help="Check the departing splash engine")
     parser.add_argument("--cpb", action="store_true", help="Emulate PICO-SRAM-BANKED registers")
     args = parser.parse_args()
     build = args.build.resolve()
@@ -507,10 +512,10 @@ def main():
     dismiss_manual = ["wait xram:0x00b4 2 120", "wait xram:0x00b0 2 90",
                       "press z", "run 3", "release z", "wait xram:0x00b0 0 120"]
     dismiss_cover = leave_cover + dismiss_manual
-    title = dismiss_cover + ["wait xram:0x0080 82 240", "wait xram:0x00b2 32 90", "run 2", "peek xram:0x0080 0x52 3 3"]
+    title = dismiss_cover + ["wait xram:0x0080 82 320", "wait xram:0x00b2 32 90", "run 2", "peek xram:0x0080 0x52 3 3"]
     boot = title + [f'wait 0x{sym["ready"]:04x} 2 180', "run 60",
                     "peek xram:0x0080 0x52 3 3"]
-    start = boot + ["press space", "run 140", "release space", "run 4",
+    start = boot + ["press space", "run 136", "release space", "run 4",
                     "peek xram:0x0082 1", "peek xram:0x0084 3 1"]
     pause = start + ["press p", "run 3", "release p", "run 3", "peek xram:0x008b 1"]
     resume = ["press p", "run 3", "release p", "run 3"]
@@ -527,6 +532,37 @@ def main():
     if not pcm_build and any((args.audio_only,args.intro_only,args.music_only,
             args.gameover_only,args.victory_only,args.audio_switch_only,args.screens_only,args.controls_only)):
         parser.error('This suite requires --build build/cc65/release-pcm; use --opl-only for the default build')
+    if args.enemy_audio_only:
+        from enemy_audio_checks import run_enemy_audio_checks
+        run_enemy_audio_checks(case,sym,fixture,resume,'enemy-opl')
+        if pcm_build:
+            legacy=[poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60])]
+            run_enemy_audio_checks(case,sym,legacy+fixture,resume,'enemy-legacy-opl')
+            run_enemy_audio_checks(case,sym,fixture,resume,'enemy-pcm',pcm=True)
+        print(f"All {count} enemy audio checks passed.",flush=True)
+        return
+    if args.splash_audio_only:
+        from splash_audio_checks import run_splash_audio_checks
+        run_splash_audio_checks(case,sym,boot,pcm_build)
+        print(f"All {count} splash engine checks passed.",flush=True)
+        return
+    if args.start_controls_only:
+        from start_checks import run_start_checks
+        run_start_checks(case,sym,boot)
+        print(f"All {count} start control checks passed.",flush=True)
+        return
+    if args.sound_modes_only:
+        from sound_mode_checks import run_sound_mode_checks
+        run_sound_mode_checks(case,sym,boot,fixture,resume,pcm_build)
+        print(f"All {count} sound mode checks passed.",flush=True)
+        return
+    if args.demo_splash_only:
+        from demo_splash_checks import run_demo_splash_checks
+        from help_checks import run_help_fade_checks
+        run_demo_splash_checks(case,sym,boot,output,dict(load_image.assets))
+        run_help_fade_checks(case,sym,boot,output)
+        print(f"All {count} demo splash/fade checks passed.",flush=True)
+        return
     if args.opl_only or (not pcm_build and not selected_suite):
         from opl_only_checks import run_opl_only_checks
         run_opl_only_checks(case,sym,boot,fixture,resume,start,build,dict(load_image.assets))
@@ -665,7 +701,7 @@ def main():
             commands += [f'shot "{(output / "cover-half.png").as_posix()}"']
     commands += ["wait xram:0x00b0 4 3", "run 2", "mark", "run 20", "expect-same",
         f'shot "{(output / "cover-black.png").as_posix()}"', "release space"] + dismiss_manual + [
-        "wait xram:0x0080 82 240", "run 2", f'peek 0x{sym["ready"]:04x} 1',
+        "wait xram:0x0080 82 320", "run 2", f'peek 0x{sym["ready"]:04x} 1',
         f'peek 0x{sym["start_level"]:04x} 1', "peek xram:0x008b 0"]
     _, buffers=case("cover-fades-and-wait",commands)
     assert buffers[:63]==[cover_palette(i) for i in range(1,64)], "Fade-in palette/frame mismatch"
@@ -682,7 +718,7 @@ def main():
         f'shot "{(output / "cover-prompt-off.png").as_posix()}"',
         "dump xram:0x0400 512", "run 30", "expect-same", "peek xram:0x02a4 222 0",
         "press q", "wait xram:0x00b0 3 3", "peek xram:0x02a4 0 255",
-        "release q"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2"])
+        "release q"] + dismiss_manual + ["wait xram:0x0080 82 320", "run 2"])
     config,bitmap,palette,colors_on,colors_off=buffers
     assert struct.unpack("<BBhhhhHH",config)==(0,0,120,222,80,8,0x0800,0x0850)
     assert bitmap==assets["cover-prompt.bin"] and any(bitmap) and not any(bitmap[-10:])
@@ -693,12 +729,12 @@ def main():
     # before fade-in; consumed keys must not trigger the game controls.
     for key in ("q","f3","p","escape","lctrl"):
         case(f"cover-key-{key}",["wait xram:0x00b0 2 180", f"press {key}", "run 3",
-            f"release {key}"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2",
+            f"release {key}"] + dismiss_manual + ["wait xram:0x0080 82 320", "run 2",
             f'peek 0x{sym["ready"]:04x} 1', f'peek 0x{sym["start_level"]:04x} 1',
             "peek xram:0x008b 0"])
     case("cover-held-before-fade",["press enter", "wait xram:0x00b0 3 180",
         "wait xram:0x00b0 4 90", "run 3", "peek xram:0x0080 0",
-        "release enter"] + dismiss_manual + ["wait xram:0x0080 82 240", "run 2",
+        "release enter"] + dismiss_manual + ["wait xram:0x0080 82 320", "run 2",
         f'peek 0x{sym["ready"]:04x} 1'])
     for fill in ("0","255"):
         case(f"cover-wait-fill-{fill}",["wait xram:0x00b0 2 180", "run 2", "mark",
@@ -719,7 +755,7 @@ def main():
     for level in reversed(range(64)):
         commands += [f"wait xram:0x00b1 {level} 3", "dump xram:0x0400 512"]
     commands += ["wait xram:0x00b0 4 3", "run 20", "peek xram:0x0080 0",
-        "release space", "wait xram:0x0080 82 240", "run 2",
+        "release space", "wait xram:0x0080 82 320", "run 2",
         f'peek 0x{sym["ready"]:04x} 1']
     _,buffers=case("manual-fades-and-wait",commands)
     assert buffers[:63]==[manual_palette(i) for i in range(1,64)]
@@ -732,7 +768,7 @@ def main():
         case(f"manual-key-{key}",leave_cover+[
             "wait xram:0x00b4 2 120", "wait xram:0x00b0 2 90",
             f"press {key}", "run 3", f"release {key}",
-            "wait xram:0x0080 82 240", "run 2", f'peek 0x{sym["ready"]:04x} 1',
+            "wait xram:0x0080 82 320", "run 2", f'peek 0x{sym["ready"]:04x} 1',
             f'peek 0x{sym["start_level"]:04x} 1', "peek xram:0x008b 0"])
 
     # Exit uses its own image/palette, holds the farewell for exactly
@@ -777,10 +813,10 @@ def main():
     width=len(footer)//8
     # Every palette fades from black, preserving RGB555 transparency. Snapshot
     # colors are independent of the generated levels, including full brightness.
-    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4))
+    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4),(0x7580,512))
     palette_dump=[f"dump xram:0x{address:04x} {size}" for address,size in palette_ranges]
-    commands=dismiss_cover+["wait xram:0x0080 82 240", "wait xram:0x00b2 0 10",
-        "run 1", "dump xram:0xd000 576", "dump xram:0x0200 16"]+palette_dump+[
+    commands=dismiss_cover+["wait xram:0x0080 82 320", "wait xram:0x00b2 0 10",
+        "run 1", "dump xram:0xd000 1088", "dump xram:0x0200 16"]+palette_dump+[
         f'shot "{(output / "game-fade-black.png").as_posix()}"']
     for level in range(1,33):
         commands += [f"wait xram:0x00b2 {level} 3", "dump xram:0x00b3 1"]+palette_dump
@@ -790,14 +826,14 @@ def main():
         "dump xram:0x0260 14", "run 120", "dump xram:0x0200 16"]
     _, buffers=case("game-fade-all-palettes",commands)
     original,river_before=buffers[:2]
-    words=struct.unpack("<288H",original)
+    words=struct.unpack("<544H",original)
     times=[]
     for level in range(33):
-        offset=2 if level==0 else 7+(level-1)*6
+        offset=2 if level==0 else 8+(level-1)*7
         if level:
             times.append(buffers[offset][0]); offset+=1
-        actual=b"".join(buffers[offset:offset+5])
-        expected=struct.pack("<288H",*((c&32)|((c&31)*level//32)|
+        actual=b"".join(buffers[offset:offset+6])
+        expected=struct.pack("<544H",*((c&32)|((c&31)*level//32)|
             ((((c>>6)&31)*level//32)<<6)|((((c>>11)&31)*level//32)<<11) for c in words))
         assert actual==expected, f"Game palette fade mismatch at level {level}"
     assert all((b-a)&255==2 for a,b in zip(times,times[1:])), "Fade step is not two VSYNCs"
@@ -807,7 +843,7 @@ def main():
     assert river_last!=river_later, "Demo did not start after fade"
 
     case("game-start-during-fade",dismiss_cover+["wait xram:0x00b2 8 240",
-        "press space", "run 140", "release space", "run 4",
+        "press space", "run 136", "release space", "run 4",
         f'peek 0x{sym["ready"]:04x} 0', "peek xram:0x0082 1", "peek xram:0x0084 3 1"])
 
     _, buffers=case("demo-footer-scroll",boot+["run 180", "dump xram:0x0260 14", "run 60",
@@ -851,7 +887,7 @@ def main():
     # the selected bridge using the real HUD sprites, including two digits.
     commands=boot+["peek 0xbd 1"]
     for level in (5,20,50,1):
-        commands += ["press f3", "run 3", f"peek 0xbd {level}", f"peek 0xc2 {level}",
+        commands += ["press f3", "run 67" if level==5 else "run 3", f"peek 0xbd {level}", f"peek 0xc2 {level}",
                      f'peek 0x{sym["start_level"]:04x} {level}', "run 32",
                      f"peek 0xbd {level}", "dump xram:0x060a 20",
                      "release f3", "run 3"]
@@ -872,7 +908,7 @@ def main():
     commands=boot+["press f2", "run 2", "release f2", "run 2", "peek 0x80 1"]
     for _ in range(2):
         commands += ["press f3", "run 3", "release f3", "run 3"]
-    case("bridge-difficulty-two-players",commands+["peek 0xbd 20", "peek 0xc2 20",
+    case("bridge-difficulty-two-players",commands+["run 65","peek 0xbd 20", "peek 0xc2 20",
          "peek 0xf4 0", "press space", "wait 0xc6 0 180", "release space", "run 3",
          "press p", "run 3", "release p", "run 3",
          poke(0xb3,4)]+resume+["wait 0xf4 1 240", "wait 0xc6 48 300", "run 3",
@@ -1053,7 +1089,7 @@ def main():
 
     for kind in ("western", "eastern", "playstation"):
         _, states = case(f"gamepad-{kind}", boot + [f"pad 0 connect {kind} sticks",
-            "pad 0 press b", "run 140", "pad 0 release b", "run 4",
+            "pad 0 press b", "run 136", "pad 0 release b", "run 4",
             "peek xram:0x0082 1", "pad 0 stick 127 0 0 0", "run 20",
             "pad 0 stick 0 0 0 0", "run 3"] + dump)
         assert states[-1][3] > 76
@@ -1710,7 +1746,7 @@ def main():
     _, buffers = case("hud-record-and-reserves", fixture + clear_score + object_at(1,8,63) + [
         poke(0xb2,43), poke(0xf5,81)] + resume + dump + ["dump xram:0x0600 180",
         "press r", "run 4", "release r", "run 4"] + dump + ["dump xram:0x0600 180",
-        "press space", "run 140", "release space", "run 4"] + dump + ["dump xram:0x0600 180"])
+        "press space", "run 136", "release space", "run 4"] + dump + ["dump xram:0x0600 180"])
     before, sprites_before, reset, sprites_reset, after, sprites_after = buffers
     assert score(before) == 500 and score(reset) == 0 and score(after) < 500
     record_before = tuple(struct.unpack_from("<H", sprites_before, i*10+4)[0] for i in range(3,9))
@@ -1826,7 +1862,7 @@ def main():
             assert states[-1][9] == (40 if hard else 95)
 
     two = boot + ["press f2", "run 2", "release f2", "run 2", "peek 0x80 1",
-                  "press space", "run 140", "release space", "run 4", "peek xram:0x0082 1",
+                  "press space", "run 136", "release space", "run 4", "peek xram:0x0082 1",
                   "press p", "run 3", "release p", "run 3", poke(0xb3,4)]
     _, states = case("two-player-switch", two + resume + ["wait 0xf4 1 240"] + dump + [
         "wait 0xc6 48 300", "run 3", "press d", "run 18", "release d", "run 2",
@@ -1835,7 +1871,7 @@ def main():
 
     # Copyright0 ($59) marks the last jet: no reserve jet remains.
     case("game-over-restart-exit", fixture + [poke(0xc0,89), poke(0xb3,4)] + resume + [
-        "wait 0xc6 255 300", "press space", "run 140", "release space", "run 4",
+        "wait 0xc6 255 300", "press space", "run 136", "release space", "run 4",
         "peek xram:0x0082 1", "peek xram:0x0084 3 1", "press escape", "expect-exit 0 480"])
     _, buffers = case("scroll-and-performance", start + ["press up space", "run 1200",
         "release up space", "run 4"] + dump + [

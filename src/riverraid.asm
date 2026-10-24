@@ -23,6 +23,8 @@
 .export _demo_tick
 .import _ready
 .export _present_frame
+.import _demo_splash_present
+.import _demo_splash_reset
 .import _terrain, _sprites
 .importzp _footer_offset
 .export _sync_tanks, _move_tanks
@@ -242,7 +244,7 @@ _present_frame:
     lda #0
     sbc _footer_offset+1
     sta RIA_RW0
-    rts
+    jmp _demo_splash_present
 
 ; Called after input, before native rules and footer rendering. The startup
 ; fade has finished; start the demo while the caption holds its opening text.
@@ -257,6 +259,7 @@ _demo_tick:
 @done:
     rts
 @activate:
+    jsr _demo_splash_reset
     lda #2
     sta _ready
     lda #0

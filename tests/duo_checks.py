@@ -29,7 +29,7 @@ def run_duo_checks(case, sym, boot, output):
 
     select = boot + ['press f2','run 3','release f2','run 3',
                      'press f2','run 3','release f2','run 8','peek 0x80 2']
-    start = select + ['press space','run 140','release space','run 4',
+    start = select + ['press space','run 136','release space','run 4',
                       'peek xram:0x0082 1']
     pause = ['press p','run 3','release p','run 3']
     resume = ['press p','run 3','release p','run 3']
@@ -57,7 +57,7 @@ def run_duo_checks(case, sym, boot, output):
         f'shot "{(output / "duo-selection.png").as_posix()}"',
         'press f1','wait xram:0x00b0 2 120','release f1',
         'wait xram:0x02a4 222 5','press space','run 3','release space',
-        'wait xram:0x0080 82 240','run 4']+preview_dump+[
+        'wait xram:0x0080 82 320','run 4']+preview_dump+[
         'press f2','run 3','release f2','run 8','peek 0x80 0',
         'dump xram:0x6400 200']+['press f2','run 3','release f2','run 8']*2+
         ['peek 0x80 2']+preview_dump)
@@ -441,7 +441,7 @@ def run_duo_checks(case, sym, boot, output):
     # Shared bonus code must retain the original nine-life cap in GAME 1/2.
     for variant in (0,1):
         classic=boot+(['press f2','run 3','release f2','run 8'] if variant else [])
-        classic+=['press space','run 140','release space','run 4']+pause+[
+        classic+=['press space','run 136','release space','run 4']+pause+[
             poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb3,[76,0,0,2,128,0]),
             poke(0xba,[0xbb,0xcc]),poke(0xc0,72),poke(0xc6,0),poke(0xb2,180),
             poke(0xf5,81),poke(0xe0,0),poke(sym['river1'],[0]*192),poke(sym['river2'],[0]*192)]

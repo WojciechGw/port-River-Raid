@@ -15,7 +15,7 @@ def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
     # before firing. The generator advances the HUD from 4 to 5 on approach.
     collision = sym['collisions']
     case('victory-natural-bridge5-hud',boot+[poke(sym['start_level'],4),
-        'press space','run 140','release space','run 4',
+        'press space','run 136','release space','run 4',
         poke(collision,96),poke(0xe2,255),poke(0xe4,255),poke(0xe6,255),poke(0xe8,255),
         'press up','wait 0xa2 8 1500','release up','press down',poke(0xb5,0),
         poke(collision,image.data[collision]),'peek 0xbd 5',
@@ -94,7 +94,7 @@ def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
             active+' 1',kind+' 0',f'peek 0x{sym["gameover_started"]:04x} 1'])
 
     duo = boot+['press f2','run 3','release f2','run 3']*2+['run 5',
-        'press space','run 140','release space','run 4',
+        'press space','run 136','release space','run 4',
         'press p','run 3','release p','run 3',poke(0xa0,[255]*6),poke(0x8e,[0]*6),
         poke(0x8b,[0,0]),poke(0xc6,0),poke(0xf8,[0]*4),
         poke(sym['duo_bridge'],0),poke(sym['duo_over'],0),poke(sym['duo_gap'],[0,0]),

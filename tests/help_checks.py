@@ -5,7 +5,9 @@ from pathlib import Path
 
 
 def run_help_fade_checks(case,sym,boot,output):
-    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4))
+    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4),(0x7580,512))
+    count=len(palette_ranges)
+    words_format='<'+str(sum(size for _,size in palette_ranges)//2)+'H'
     palette_dump=[f'dump xram:0x{address:04x} {size}' for address,size in palette_ranges]
     state_dump=['dump 0x80 128',f'dump 0x{sym["duo_players"]:04x} 46']
     pause=['press p','run 3','release p','run 3']
@@ -14,7 +16,7 @@ def run_help_fade_checks(case,sym,boot,output):
             name=f'help-fade-game{variant+1}-'+('mono' if mono else 'color')
             commands=boot+['press f2','run 3','release f2','run 8']*variant
             if mono: commands+=['press f4','run 3','release f4','run 3']
-            commands+=['press space','run 140','release space','run 4']+pause
+            commands+=['press space','run 136','release space','run 4']+pause
             commands+=palette_dump+state_dump+['mark','press f1',
                 'wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5',
                 'press z','run 3','release z','wait xram:0x00b0 0 120',
@@ -27,16 +29,16 @@ def run_help_fade_checks(case,sym,boot,output):
             commands+=['wait xram:0x0080 82 10','run 3','expect-same',
                 'peek xram:0x008b 1']+pause+['run 10','dump 0x80 128']
             _,buffers=case(name,commands,rom_args=('/v',))
-            words=struct.unpack('<288H',b''.join(buffers[:5]))
-            state=buffers[5:7]
+            words=struct.unpack(words_format,b''.join(buffers[:count]))
+            state=buffers[count:count+2]
             times=[]
             for level in range(33):
-                offset=7+level*8
+                offset=count+2+level*(count+3)
                 times.append(buffers[offset][0])
-                expected=struct.pack('<288H',*((c&32)|((c&31)*level//32)|
+                expected=struct.pack(words_format,*((c&32)|((c&31)*level//32)|
                     ((((c>>6)&31)*level//32)<<6)|((((c>>11)&31)*level//32)<<11) for c in words))
-                assert b''.join(buffers[offset+1:offset+6])==expected, f'{name}: palette level {level}'
-                assert buffers[offset+6:offset+8]==state, f'{name}: game advanced during fade'
+                assert b''.join(buffers[offset+1:offset+1+count])==expected, f'{name}: palette level {level}'
+                assert buffers[offset+1+count:offset+3+count]==state, f'{name}: game advanced during fade'
             assert all((b-a)&255==2 for a,b in zip(times[1:],times[2:])), 'Uneven fade cadence'
             assert buffers[-1]!=state[0], 'Game did not resume after fade/pause'
 
@@ -45,12 +47,12 @@ def run_life_hud_checks(case, sym, boot, output):
     icons=['dump xram:0x0600 190']
     help_roundtrip=['press f1','wait xram:0x00b0 2 120','release f1',
         'wait xram:0x02a4 222 5','press space','run 3','release space',
-        'wait xram:0x0080 82 240','run 4']
+        'wait xram:0x0080 82 320','run 4']
     for variant in (0,1):
         select=boot+(['press f2','run 3','release f2','run 8'] if variant else [])
         _,data=case(f'classic-selection-life-icons-game{variant+1}',select+icons+[
             f'shot "{(output / f"game{variant+1}-selection-lives.png").as_posix()}"']+
-            help_roundtrip+icons+['press space','run 140','release space','run 4',
+            help_roundtrip+icons+['press space','run 136','release space','run 4',
                 'press p','run 3','release p','run 3']+icons+[
                 'poke 0xc0 8','run 3']+icons+[
                 f'poke 0xc0 {sym["rr_Copyright0"]&255}','run 3']+icons)
@@ -77,13 +79,13 @@ def run_help_checks(case, sym, boot, output):
                "wait xram:0x00b0 2 120", "run 90", "peek xram:0x00b0 2",
                "release f1", "wait xram:0x02a4 222 5"]
     closing = ["press space", "run 3", "release space",
-               "wait xram:0x0080 82 240", "run 3"]
+               "wait xram:0x0080 82 320", "run 3"]
     pause = ["press p", "run 3", "release p", "run 3"]
     # Follow real turn changes, rather than forcing PLAYER in a paused game.
     hud_dump=['dump xram:0x0100 32','dump xram:0x056c 24',
               'dump xram:0x0600 190','dump xram:0xa000 1920','dump 0xf4 1']
     game2=boot+['press f2','run 3','release f2','run 8',
-                'press space','run 140','release space','run 4']+pause
+                'press space','run 136','release space','run 4']+pause
     _,hud=case('game2-player-hud-colors',game2+hud_dump+[
         f'shot "{(output / "game2-hud-p1.png").as_posix()}"',
         'poke 0xb3 4']+pause+['wait 0xf4 1 240','wait 0xc6 48 300','run 3']+
@@ -123,14 +125,14 @@ def run_help_checks(case, sym, boot, output):
         options=(('/opl2','/V') if variant==1 else ('/v','/opl2')) if verbose else ()
         select=boot+[cmd for _ in range(variant) for cmd in
                      ('press f2','run 3','release f2','run 8')]
-        start=select+['press space','run 140','release space','run 4']+pause
+        start=select+['press space','run 136','release space','run 4']+pause
         text_dump=['dump xram:0x02c0 12']
         toggle=['press f9','run 3','release f9','run 3']
         cycle=['press f10','run 3','release f10','run 3']
         _,data=case(f'sound-status-game{variant+1}{suffix}',start+[
             'dump xram:0x0220 30','dump xram:0xbf80 4']+text_dump+[
             f'shot "{(output / f"sound-status-on-game{variant+1}{suffix}.png").as_posix()}"']+
-            toggle+text_dump+[
+            toggle*2+text_dump+[
             f'shot "{(output / f"sound-status-off-game{variant+1}{suffix}.png").as_posix()}"',
             'mark']+opening+closing+['expect-same']+
             cycle+text_dump+cycle+text_dump+cycle+toggle+text_dump+['run 60','mark']+
@@ -141,7 +143,7 @@ def run_help_checks(case, sym, boot, output):
         assert struct.unpack('<BBhhhhHH',data[0][16:])==(0,0,280 if verbose else 312,232,8,8,0x02c0,0xbf80)
         assert data[1]==data[8]==bytes((0,0,255,255)), 'Status is not white on black'
         on=note+b'OPL ' if verbose else bytes(8)+b'    '
-        off=muted+(b'OPL ' if verbose else b'    ')
+        off=muted+b'OFF '
         unmuted=(note if verbose else bytes(8))+b'OPL '
         assert data[2:8]==[on,off,off,off,unmuted,on]
         assert data[9]==on
@@ -152,7 +154,7 @@ def run_help_checks(case, sym, boot, output):
     for variant in range(3):
         select = boot + [cmd for _ in range(variant) for cmd in
                          ("press f2", "run 3", "release f2", "run 8")]
-        start = select + ["press space", "run 140", "release space", "run 4"]
+        start = select + ["press space", "run 136", "release space", "run 4"]
         for backend in (("pcm", "opl2") if variant==0 else ("pcm",)):
             _, buffers = case(f"help-resume-game{variant+1}-{backend}",
                 start+pause+snapshot+["mark"]+opening+[
@@ -172,7 +174,7 @@ def run_help_checks(case, sym, boot, output):
         _,buffers=case(f"help-live-game{variant+1}",start+opening+[
             "dump 0x80 128", f'dump 0x{sym["duo_players"]:04x} 46',
             "run 120", "dump 0x80 128", f'dump 0x{sym["duo_players"]:04x} 46',
-            "press q", "run 3", "release q", "wait xram:0x0080 82 240",
+            "press q", "run 3", "release q", "wait xram:0x0080 82 320",
             "dump 0x80 128", f'dump 0x{sym["duo_players"]:04x} 46',
             "peek xram:0x008b 0", "run 10", "dump 0x80 128"])
         assert buffers[:2]==buffers[2:4], "Live game advanced while help was open"
@@ -188,7 +190,7 @@ def run_help_checks(case, sym, boot, output):
         assert buffers[0]==buffers[7] and buffers[3:7]==buffers[10:14]
 
     case("help-attract-consumes-escape",boot+opening+[
-        "press escape", "run 3", "release escape", "wait xram:0x0080 82 240",
+        "press escape", "run 3", "release escape", "wait xram:0x0080 82 320",
         "run 3", f'peek 0x{sym["ready"]:04x} 2', "peek 0x80 0"])
     _, values=case("remapped-function-keys",boot+pause+[
         "dump 0x0282 1", "press f4", "run 3", "dump 0x0282 1",
@@ -202,7 +204,7 @@ def run_help_checks(case, sym, boot, output):
     for variant in range(3):
         select=boot+[cmd for _ in range(variant) for cmd in
                      ('press f2','run 3','release f2','run 8')]
-        start=select+['press space','run 140','release space','run 4']
+        start=select+['press space','run 136','release space','run 4']
         for backend in ('opl2','pcm'):
             sound_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
                         'dump xram:0xc000 256' if backend=='opl2' else
@@ -210,16 +212,16 @@ def run_help_checks(case, sym, boot, output):
             flag=f'peek 0x{sym["audio_muted"]:04x}'
             # Check the frame budget through F9/F1. A full terrain rebuild
             # on R can take an extra frame independently of the mute toggle.
+            mute=['press f9','run 3','release f9','run 3']*2
             _,buffers=case(f'f9-mute-game{variant+1}-{backend}',start+[flag+' 0']+
-                sound_dump+['press f9','run 3',flag+' 1','peek xram:0x008b 0']+
-                sound_dump+['press space','run 20',flag+' 1']+sound_dump+[
+                sound_dump+mute+[flag+' 3','peek xram:0x008b 0']+
+                sound_dump+['press space','run 20',flag+' 3']+sound_dump+[
                     'release space','release f9','run 3']+pause+opening+closing+[
-                    flag+' 1','peek xram:0x008b 1']+sound_dump+pause+[
-                    'press f9','run 3','release f9','run 3',flag+' 0']+sound_dump+[
-                    'press f9','run 3','release f9','run 3',flag+' 1',
+                    flag+' 3','peek xram:0x008b 1']+sound_dump+pause+[
+                    'press f9','run 3','release f9','run 3',flag+' 0']+sound_dump+mute+[flag+' 3',
                     'peek xram:0x009e 0 0',
-                    'press r','run 4','release r','run 4',flag+' 1',
-                    'press f2','run 3','release f2','run 8',flag+' 1'],
+                    'press r','run 4','release r','run 4',flag+' 3',
+                    'press f2','run 3','release f2','run 8',flag+' 3'],
                 gameplay=False,rom_args=('/'+backend,))
             amplitudes=buffers[::2]
             assert any(amplitudes[0]) and any(amplitudes[4]), 'F9 did not restore sound'

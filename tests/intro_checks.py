@@ -78,11 +78,11 @@ def run_intro_checks(case, sym, boot, output, build, assets):
         for page in range(1,33):
             commands += [f'poke xram:0x09fe 0 {page%4}','run 1']
         commands += [f'dump {cursor} 2',
-            'press z', 'run 3', 'release z', 'wait xram:0x0080 82 240',
+            'press z', 'run 3', 'release z', 'wait xram:0x0080 82 320',
             f'wait 0x{sym["ready"]:04x} 2 180',
             f'peek 0x{sym["audio_backend"]:04x} {backend}',
             'run 3',f'peek {running} 1',f'peek {kind} 2',
-            'press space', 'run 140', 'release space', 'run 4',
+            'press space', 'run 136', 'release space', 'run 4',
             'peek xram:0x0082 1',f'peek {running} 1',f'peek {kind} 2',
             f'peek 0x{sym["pcm_enabled"]:04x} {int(backend==3)}',
             f'dump 0x{sym["pcm_amplitude"]:04x} 2']
@@ -94,11 +94,11 @@ def run_intro_checks(case, sym, boot, output, build, assets):
 
     # F1 loads the overlay again during gameplay. Saved palette/video at
     # $F100..$F8FF must survive; the music score is above this backup.
-    commands = boot + ['press space', 'run 140', 'release space', 'run 4',
+    commands = boot + ['press space', 'run 136', 'release space', 'run 4',
         'press p', 'run 3', 'release p', 'run 3', 'mark',
         'dump xram:0x0100 32', 'press f1', 'run 3', 'release f1',
         'wait xram:0x00b0 2 120', 'wait xram:0x02a4 222 5', f'peek {active} 1',
-        'press z', 'run 3', 'release z', 'wait xram:0x0080 82 240',
+        'press z', 'run 3', 'release z', 'wait xram:0x0080 82 320',
         'run 3', 'expect-same', 'dump xram:0x0100 32']
     _, palettes = case('intro-f1-preserves-game', commands)
     assert palettes[0] == palettes[1], 'Intro overlay damaged saved game colors'
@@ -141,6 +141,7 @@ def run_intro_checks(case, sym, boot, output, build, assets):
 
     case('intro-demo-mute-and-mode',boot+['run 3',f'peek {kind} 2',
         'press f9','run 3','release f9','run 3',f'peek {running} 0',
+        'press f9','run 3','release f9','run 3',f'peek {running} 0',
         'press f9','run 3','release f9','run 3',f'peek {running} 1',
         'press f2','run 3','release f2','run 8',f'peek {running} 1',f'peek {kind} 2'])
 
@@ -171,7 +172,7 @@ def run_intro_checks(case, sym, boot, output, build, assets):
             commands += ['expect-exit 0 5']
         else:
             # Reopening F1 must restore full intro volume after reaching silence.
-            commands += ['release z','wait xram:0x0080 82 240',
+            commands += ['release z','wait xram:0x0080 82 320',
                 f'wait 0x{sym["ready"]:04x} 2 180','run 4',
                 'press f1','wait xram:0x00b0 2 120',f'peek {gain} 63']
         _,observed=case(f'intro-{screen}-opl-and-pcm-fade',commands,gameplay=False)
@@ -191,6 +192,6 @@ def run_intro_checks(case, sym, boot, output, build, assets):
         'press f9','run 3','release f9','run 3',f'peek {running} 0',
         'press f1','wait xram:0x00b0 2 120','release f1',
         'wait xram:0x02a4 222 5',f'peek {active} 0',
-        'press z','run 3','release z','wait xram:0x0080 82 240','run 3',
+        'press z','run 3','release z','wait xram:0x0080 82 320','run 3',
         'press escape','wait xram:0x00b0 2 120',f'peek {active} 0','expect-exit 0 260'],
         gameplay=False)

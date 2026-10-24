@@ -44,24 +44,30 @@ Missiles launch four logical columns from the plane's left edge, one column
 left of the Atari offset. Rendering and collisions use this same position.
 Each missile uses color 1 of its own plane's palette, including both DUO
 pilots and black-and-white mode.
-F9 toggles all sound without pausing the game or changing the audio backend.
+F9 cycles all sound → effects only → full mute → all sound,
+without pausing the game or changing the audio backend. `audio_muted` is
+a mask: bit 0 suppresses music (including percussion, victory/game-over
+jingles, F1 and outro); bit 1 suppresses procedural game effects.
 It acts once per press and retains its setting across restart, mode changes
 and the F1 manual. Sound starts enabled when the program is launched.
 F10 switches OPL2 ↔ PCM, remaining on OPL2 when the firmware rejects
 its interface. It stops the previous backend before initializing the next,
-ignores presses while F9 has muted sound, and retains the selection through
-F1 and restart. A successful F10 press or unmuting with F9 shows OPL or PCM for 60 display
+ignores presses only during full mute, and retains the selection through
+F1 and restart. In the full PCM build, a successful F10 press or returning to all sound with F9 shows OPL or PCM for 60 display
 frames (one second), including paused frames. Each new such press restarts the
 timer; holding the key does not. Opening F1 dismisses the transient label.
-With `/v`, the note and backend remain visible. The icons are defined in
+With `/v`, the note and backend remain visible in the full build. The default
+OPL2-only build never displays the backend name, including after F9 and with
+`/v`. Both builds show SFX or OFF for the two restricted sound states.
+The note stays at (312,232) when no label is visible. The icons are defined in
 `src/graphics.h` and drawn at (312,232) as a 1bpp bitmap;
 the backend starts at (296,232), with three characters aligned to the right
 screen edge. While it is visible, the note moves left to (280,232).
 The text uses the VGA's built-in 8×8 font in
 [character mode](https://picocomputer.github.io/vga.html). Both are white on
 the black margin below the scroller, update on F9/F10, expiry or initialization, and share
-the white splash palette for startup fade. Without `/v`, only the muted icon
-is shown, with a temporary backend label after F9 enables sound or F10 switches the backend.
+the white splash palette for startup fade. Without `/v`, the note is hidden
+only in the all-sound state; it is crossed when the music mute bit is set.
 F1 opens the instruction screen.
 
 Balloons (ID 11) extend the executable copy of the routines: from level two,
@@ -331,6 +337,9 @@ host saves terrain base colors at $F100 and live video data ($0100-$07FF)
 at $F200-$F8FF, above the last manual pixel. On return it rebuilds static
 graphics and terrain from the preserved CPU collision edges, restores
 palettes/descriptors and redraws the HUD without advancing game logic.
+The restored screen then fades in over 64 VSYNCs, with every palette scaled
+from black to its saved colors. Gameplay remains frozen until the fade ends,
+and an existing pause is preserved.
 The VSYNC baseline is reset so time spent in help is not counted as dropped
 game frames. Audio is reinitialized using the selected backend.
 The cover helpers and tank extension code/state share free CPU memory from
@@ -356,12 +365,37 @@ one final VSYNC displays it before returning to the console, even with Escape he
 
 In attract mode, the footer is replaced by a caption scrolling left by one
 canvas pixel per frame. The text and readable glyphs are in `src/demo-footer.json`.
-After the manual closes, `src/fade.c` and `src/fade.asm` fade in the entire
-game screen over 64 VSYNCs (about one second). All 288 palette entries are
-saved in XRAM $D000 and scaled into staging at $D300. Each RGB555 channel
+The demo overlay comes from `assets/splash.bmp` (128x64, up to 256
+palette entries). `tools/make_demo_splash.py` packs two unscaled 64x64 8bpp
+sprites at XRAM $6500 and $D600, resting at (200,4) and (264,4). The front
+sprite plane starts at scanline zero, displaying the entire image. Black
+is transparent. Entry starts immediately at X=320 and moves left by 2 pixels
+per live demo frame, reaching X=200 after 60 frames. A start request switches
+to 8 pixels per frame until X=-128; only then does actual play begin.
+During departure, audio_update enables only the existing engine effect,
+using OPL2 or PCM according to the selected backend. Other demo effects stay
+muted. The music mixer admits this engine during demo; F9 OFF, pause, F1,
+completion and F2 cancellation stop it without leaving an OPL voice keyed on.
+The palette remains at full brightness during both slides. The backdrop
+and music continue. Repeated start presses do not reset the slide;
+F2 cancels the request and starts a new demo. Pause and F1 preserve the position
+and pending request. The native fly-in launches without synthesizing FIRE;
+a start/fire button is consumed until release. The former RGB5 fade lookup
+is no longer needed; the XRAM image allocation is unchanged.
+The front-plane list at $7500 contains both player jets
+followed by these two sprites; the legacy jet descriptors remain available.
+The active 256-color palette at $7580 follows F4 and screen fades, with color
+and grayscale originals at $7780 and $7980. F1 reloads the asset before restoring video.
+Each palette occupies 512 bytes. The 1088-byte fade staging buffer follows
+at $7B80..$7FBF, leaving 64 bytes before object images at $8000. The source
+buffer uses $D000..$D43F, before the right splash tile at $D600.
+The game-over installation uses temporary XRAM $E800, clear of both images.
+After the initial manual or F1 closes, `src/fade.c` and `src/fade.asm` fade in the entire
+game screen over 64 VSYNCs (about one second). All 544 palette entries are
+saved in XRAM $D000 and scaled into staging at $7B80. Each RGB555 channel
 uses 32 brightness steps, preserving the transparency bit. Palettes start
 black before video planes are enabled; each update is copied at VSYNC in
-about 0.8 ms at 8 MHz, before the playfield is scanned. The scene remains
+before the playfield is scanned at 8 MHz. The scene remains
 stationary during the fade. XRAM $00B2 reports brightness (0..32), followed
 by the last publication's VSYNC byte. The scratch buffers do not overlap
 the PCM ring or OPL2 registers. Once the fade finishes, the demo starts
@@ -444,8 +478,10 @@ With no PCM support, VSYNC clocks a complete OPL2 arrangement with drums.
 The score occupies XRAM $F900, OPL2 registers $C900, and the PCM header/ring
 $CA00/$CA08 (1024 bytes). ROM pages stream three pages ahead of the consumer.
 After initial video setup, the player replaces startup-only argument parsing,
-palette conversion and fade code in `STARTUP_AUDIO`; its temporary ZP copy routine then becomes
+palette conversion in `STARTUP_AUDIO`; its temporary ZP copy routine then becomes
 player state. This preserves the 1 KiB stack and survives returning from F1.
+The reusable fade code stays resident in CODE, with state in BSS. Bridge-award
+helpers live in MUSIC so the player still fits the smaller startup overlay.
 The installed overlay also holds the DUO fuel-row renderer, which is first
 used after selecting GAME 3. Before a flight starts, both DUO HUD panels show
 three planes and full fuel; an active flight uses the actual player state.
@@ -501,6 +537,12 @@ All backends preserve refueling/alarm sequences. Missiles descend from
 about 400 to 200 Hz over 18 frames (0.3 seconds). OPL2 keeps the engine,
 missile, blast and fuel tone on separate voices, so they can play together.
 PCM retains its two-voice priority: bridge explosions override missiles.
+Bank and road tanks trigger a descending 200-to-100 Hz shot; firing helicopters
+use 800-to-400 Hz. Both use an 18-frame decaying envelope, triggered only when
+a projectile launches. A new enemy shot retriggers their shared voice. OPL2
+temporarily uses the fuel-tone voice, preserving player fire, explosions and
+music. PCM temporarily replaces the engine/fuel voice, with crashes retaining
+priority. Pause, mute, death and F1 discard the enemy-shot tail.
 Death cancels the engine and missile tail. Pause and attract mode suppress
 effects (demo music continues). Explicit OPL2 initialization stops any PCM stream, and exiting
 releases the selected sound device.

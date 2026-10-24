@@ -94,7 +94,7 @@ def run_demo_footer_checks(case, sym, boot, output, fixture):
         _, data = case(f'footer-game{variant+1}-static-logo', select + [
             'dump xram:0x06b4 10', 'dump xram:0x5a00 256',
             f'shot "{(output / f"logo-before-game{variant+1}.png").as_posix()}"',
-            'press space', 'run 140', 'release space', 'run 4',
+            'press space', 'run 136', 'release space', 'run 4',
             'dump xram:0x06b4 10', 'dump xram:0x5a00 256',
             f'shot "{(output / f"logo-playing-game{variant+1}.png").as_posix()}"'])
         for descriptor, bitmap in (data[:2],data[2:]):
@@ -121,7 +121,7 @@ def run_demo_footer_checks(case, sym, boot, output, fixture):
         'dump xram:0x0260 14', 'mark', 'run 60', 'expect-same',
         'press f1', 'wait xram:0x0080 0 10', 'wait xram:0x00b0 2 120',
         'release f1', 'wait xram:0x02a4 222 5', 'press space', 'run 3',
-        'release space', 'wait xram:0x0080 82 240', 'run 3', 'expect-same',
+        'release space', 'wait xram:0x0080 82 320', 'run 3', 'expect-same',
         'dump xram:0x0260 14', f'dump xram:0x3800 {len(duo)}'] + pause + [
         'run 150', 'dump xram:0x0260 14', 'run 30', 'dump xram:0x0260 14'])
     assert data[0] == data[1] and data[2] == duo
@@ -133,7 +133,7 @@ def run_demo_footer_checks(case, sym, boot, output, fixture):
         'mark', 'run 120', 'expect-same',
         'press f1', 'wait xram:0x0080 0 10', 'wait xram:0x00b0 2 120',
         'release f1', 'wait xram:0x02a4 222 5', 'press space', 'run 3',
-        'release space', 'wait xram:0x0080 82 240', 'run 3', 'expect-same'] + pause + [
+        'release space', 'wait xram:0x0080 82 320', 'run 3', 'expect-same'] + pause + [
         'run 20', 'dump xram:0x0260 14', 'run 25', 'dump xram:0x0260 14'])
     assert struct.unpack_from('<h', data[0], 2)[0] == -320
     assert struct.unpack_from('<h', data[1], 2)[0] < -320
@@ -154,7 +154,7 @@ def run_demo_footer_checks(case, sym, boot, output, fixture):
     assert struct.unpack_from('<h',buffers[4],4)[0]==4
     assert struct.unpack_from('<h',buffers[5],0)[0]==180
     _, data = case('footer-duo-start-and-classic-return', select + [
-        'press space', 'run 140', 'release space', 'run 4',
+        'press space', 'run 136', 'release space', 'run 4',
         'dump xram:0x0260 14', 'press f2', 'run 3', 'release f2', 'run 8',
         'dump xram:0x0260 14', f'dump xram:0x3800 {len(classic)}'])
     assert struct.unpack_from('<h', data[0], 4)[0] < 0

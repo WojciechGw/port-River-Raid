@@ -75,7 +75,7 @@ _gameover_install:
     lda #<code_path
     ldx #>code_path
     jsr boot_open
-    xreg_values $E000, __GAMEOVER_SIZE__
+    xreg_values $E800, __GAMEOVER_SIZE__
     lda #<__GAMEOVER_SIZE__
     ldx #>__GAMEOVER_SIZE__
     jsr boot_read_xram
@@ -92,7 +92,7 @@ _gameover_install:
     sta ptr1+1
     lda #0
     sta RIA_ADDR0
-    lda #$e0
+    lda #$e8
     sta RIA_ADDR0+1
     ldy #0
     jmp copy_code
@@ -118,6 +118,7 @@ copy_start:
     inc installed
     jmp initialize
 copy_end:
+.assert $E800+__GAMEOVER_SIZE__ <= $F100, lderror, "Installation scratch overlaps F1 backup"
 .assert copy_end-copy_start <= 33, error, "Bootstrap exceeds ZP workspace"
 code_path: .asciiz "ROM:gameover-code.bin"
 
@@ -137,6 +138,7 @@ update:
     stz pending
     jsr award
     lda _audio_muted
+    and #1
     ora _paused
     bne @death
     inc victory_started
@@ -181,6 +183,7 @@ update:
     cmp #0
     bne @playing
     lda _audio_muted
+    and #1
     ora _paused
     bne @playing
     inc started
@@ -190,12 +193,14 @@ update:
     lda active
     bne @active
     lda _audio_muted
+    and #1
     ora _paused
     jne idle
     lda #2
     jsr start
 @active:
     lda _audio_muted
+    and #1
     jne finish
     lda kind
     cmp #2

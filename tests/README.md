@@ -1,5 +1,42 @@
 # Testy portu
 
+`python tests/emulator_checks.py --demo-splash-only` sprawdza dwa sprite’y
+64x64 składające się na obraz 128x64 na Y=4, bez skalowania.
+Obejmuje GAME 1–3, przejścia demo/gra, F1, F4, przezroczystość tła,
+odtworzenie pikseli po F1 i rozjaśnianie wszystkich palet. Sprawdza też
+wjazd z prawej do X=200 (2 px/klatkę), szybki wyjazd w lewo (8 px/klatkę),
+stałą jasność i odstęp między sprite’ami, zatrzymanie podczas pauzy/F1,
+paletę mono przy F4 i krótkie naciśnięcie Start jeszcze podczas wjazdu.
+Zestaw działa z `--build build/cc65/release-pcm`. Podglądy zapisuje jako
+`checks/demo-splash-game1.png` (analogicznie dla GAME 2 i 3).
+
+`python tests/emulator_checks.py --splash-audio-only` sprawdza silnik podczas
+wyjazdu splasha, F9, pauzę/F1 i anulowanie przez F2. Z wersją PCM sprawdza
+również próbki silnika, miksowanie z muzyką i zastępczy wariant OPL2 bez PCM.
+
+`python tests/emulator_checks.py --start-controls-only` sprawdza start bez strzału
+we wszystkich trybach, z klawiatury i pada, oraz strzelanie po puszczeniu przycisku.
+
+`python tests/emulator_checks.py --sound-modes-only` sprawdza trzy stany F9:
+pełny dźwięk, same efekty i cisza. Obejmuje etykiety SFX/OFF,
+przytrzymanie klawisza, F1 w GAME 1–3, obie fanfary oraz przyznawanie życia
+przy wyłączonej muzyce. Z `--build build/cc65/release-pcm` sprawdza także
+efekty PCM i działanie F10 przy częściowym wyciszeniu.
+
+`python tests/emulator_checks.py --enemy-audio-only` sprawdza wystrzały
+czołgów nad rzeką, czołgów na drodze i helikopterów: wysokość dźwięku,
+zanikanie, równoczesny strzał gracza i muzykę oraz pauzę i F9. Z opcją
+`--build build/cc65/release-pcm` obejmuje efekty OPL2 z perkusją PCM,
+firmware bez PCM i efekty PCM. Te scenariusze należą też do zestawów
+`--opl-only` i `--music-only`. Wersja OPL2 nie może pokazywać etykiety
+generatora po F9 ani przy `/v`; ikona nadal pokazuje stan wyciszenia.
+
+`help-fade-game1/2/3-color/mono` sprawdzają wszystkie 33 poziomy rozjaśniania
+po powrocie z F1, sześć zakresów palet (w tym oba HUD-y, ikonę dźwięku i splash),
+zachowanie przezroczystości i rytm dwóch VSYNC-ów na poziom. Stan gry i obu
+pilotów musi pozostać niezmieniony przez cały efekt; pauza pozostaje aktywna,
+a rozgrywka rusza po jej wyłączeniu. Zrzuty PNG pokazują poziomy 0, 16 i 32.
+
 Domyślny wariant bez PCM: `cmake --preset cc65/Release`, następnie
 `cmake --build --preset cc65/Release` i `python tests/emulator_checks.py`.
 Bez wybrania zestawu skrypt wykrywa paczkę OPL2 i uruchamia testy `--opl-only`.
@@ -213,7 +250,7 @@ szerokość 960 pikseli logicznych, trzysekundowy postój, sekundowe postoje co 
 zawinięciu), zgodność tekstu GAME 3 z GAME 1/2, pauzę, odtworzenie
 po F1, publikację obrazu przy VSYNC i powrót do GAME 1.
 Scenariusz `game-fade-all-palettes` sprawdza rozjaśnianie całego ekranu po
-okładce: wszystkie 288 kolorów, zachowanie przezroczystości, 32 kroki co dwa
+okładce: wszystkie 544 kolory, zachowanie przezroczystości, 32 kroki co dwa
 VSYNC-i oraz dokładne przywrócenie palet. Potwierdza nieruchomą scenę podczas
 przejścia, start rzeki zaraz po nim oraz nieruchomy napis podczas początkowego
 postoju. Zrzuty

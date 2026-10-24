@@ -41,9 +41,13 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
     legacy=[poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60])]
     check_opl_crash(case,sym,legacy+fixture,resume,'music-crash-no-pcm')
     check_opl_crash(case,sym,fixture,resume,'music-crash-hybrid',channel=4)
+    from enemy_audio_checks import run_enemy_audio_checks
+    run_enemy_audio_checks(case,sym,fixture,resume,'hybrid-opl')
+    run_enemy_audio_checks(case,sym,legacy+fixture,resume,'legacy-opl')
+    run_enemy_audio_checks(case,sym,fixture,resume,'hybrid-pcm',pcm=True)
     opening=['press f1','wait xram:0x00b0 2 120','release f1',
              'wait xram:0x02a4 222 5']
-    closing=['press z','run 3','release z','wait xram:0x0080 82 240','run 4']
+    closing=['press z','run 3','release z','wait xram:0x0080 82 320','run 4']
     for backend,mode in (('opl2',1),):
         commands=legacy+['wait xram:0x00b0 2 180',synth+f' {mode}',
                          'dump xram:0x0100 256']
@@ -54,10 +58,11 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
             assert any(d[0xb0+channel]&32 for d in dumps), 'Missing FM percussion voice'
         commands=legacy+boot+[synth+f' {mode}',active+' 1',kind+' 2',
             'dump xram:0xc900 256','run 60','dump xram:0xc900 256',
-            'press space','run 140','release space','run 4',active+' 1',kind+' 2',
+            'press space','run 136','release space','run 4',active+' 1',kind+' 2',
             'dump xram:0xc900 256','press p','run 3','release p','run 3','mark']
         commands+=opening+[synth+f' {mode}']+closing+['expect-same']+resume+[
             'run 8',active+' 1',kind+' 2',synth+f' {mode}',
+            'press f9','run 3','release f9','run 3',active+' 0',
             'press f9','run 3','release f9','run 3',active+' 0',
             'press f9','run 3','release f9','run 4',active+' 1',kind+' 2']
         _,dumps=case(f'music-flight-help-mute-no-pcm-{backend}',commands,rom_args=('/'+backend,))

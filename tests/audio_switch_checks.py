@@ -8,9 +8,10 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
     enabled=f'peek 0x{sym["pcm_enabled"]:04x}'
     amplitudes=f'dump 0x{sym["pcm_amplitude"]:04x} 2'
     tap=['press f10','run 3','release f10','run 3']
+    f9=['press f9','run 3','release f9','run 3']
     opening=['press f1','wait xram:0x0080 0 10','wait xram:0x00b0 2 120',
              'release f1','wait xram:0x02a4 222 5']
-    closing=['press space','run 3','release space','wait xram:0x0080 82 240','run 3']
+    closing=['press space','run 3','release space','wait xram:0x0080 82 320','run 3']
 
     for option,initial in (('opl2',2),('pcm',3)):
         commands=fixture+['dump 0x80 128']
@@ -33,13 +34,13 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         if duo:
             setup=start+['press f2','run 3','release f2','run 8',
                          'press f2','run 3','release f2','run 8',
-                         'press space','run 140','release space','run 4','press down s']
+                         'press space','run 136','release space','run 4','press down s']
         else:
             setup=fixture+resume+['press down']
-        commands=setup+['press f9','run 3','release f9','run 3',muted+' 1']
+        commands=setup+f9*2+[muted+' 3']
         for _ in range(6):
-            commands+=tap+[backend+' 2',muted+' 1',amplitudes,
-                            'peek xram:0x02c8 32 32 32 32']
+            commands+=tap+[backend+' 2',muted+' 3',amplitudes,
+                            'peek xram:0x02c8 79 70 70 32']
         commands+=['press f9','run 3','release f9','run 3',muted+' 0',amplitudes,
                    'release down s','peek xram:0x008b 0']
         _,data=case(f'f10-live-muted-{"duo" if duo else "solo"}',commands)
@@ -71,8 +72,7 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
     assert data==[b'PCM ',b'    ',b'OPL ']
 
     for option,current,label in (('opl2',2,b'OPL '),('pcm',3,b'PCM ')):
-        _,data=case(f'f9-unmute-notice-{option}',fixture+[
-            'press f9','run 3','release f9','run 3',muted+' 1',
+        _,data=case(f'f9-unmute-notice-{option}',fixture+f9*2+[muted+' 3',
             'dump xram:0x02c0 8','dump xram:0x02c8 4',
             'press f9','run 3',muted+' 0',backend+f' {current}',
             'dump xram:0x02c0 8','dump xram:0x02c8 4',
@@ -80,7 +80,7 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
             'dump xram:0x02c8 4','release f9','run 3'],
             rom_args=('/'+option,))
         assert any(data[0]) and not any(data[2]), 'F9 did not hide the muted note'
-        assert data[1]==b'    '
+        assert data[1]==b'OFF '
         assert data[3:]==[label,label,b'    '], 'F9 notice did not expire while held'
 
     # This emulator always supports PCM. Simulate the capability probe's

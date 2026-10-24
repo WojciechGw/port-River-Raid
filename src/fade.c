@@ -2,7 +2,7 @@
 #include "xram.h"
 
 /* Startup and F1 return: preserve every palette, including transparent entries,
- * above the audio ring. Keep this code/state outside the startup music overlay.
+ * in buffers separate from audio and images. Keep this code/state outside the startup music overlay.
  * Prepare colors offscreen; publish them together at VSYNC. */
 #pragma optimize(push, on)
 #pragma code-name("CODE")
@@ -18,7 +18,7 @@ static void fade_palette(uint8_t level)
     for (i=0;i<32;++i) scaled[i]=(i*level)>>5;
     RIA.addr0=XRAM_GAME_FADE_SOURCE;
     RIA.addr1=XRAM_GAME_FADE_STAGING;
-    for (i=0;i<288;++i) {
+    for (i=0;i<GAME_FADE_WORDS;++i) {
         color=game_fade_read();
         faded=(color&32)|scaled[color&31]|
             ((uint16_t)scaled[(color>>6)&31]<<6)|

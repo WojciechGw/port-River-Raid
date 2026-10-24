@@ -65,10 +65,16 @@ void rr_tank_bonus(void);
 void rr_tank_crash(void);
 void demo_tick(void);
 void present_frame(void);
+void demo_splash_load(void);
+void demo_splash_present(void);
+void demo_splash_palette(void);
+void demo_splash_start(void);
+extern uint8_t demo_splash_done,demo_splash_out;
 int sound_status_init(void);
 void sound_status_update(void);
 void sound_status_notify(void);
 void sound_status_tick(void);
+void sound_status_f9(void);
 void refresh_jet_palette(void);
 void show_cover(void);
 void show_outro(void);
@@ -161,6 +167,7 @@ static uint8_t first_water[256], last_water[256];
 static uint8_t edge_left[96], edge_right[96], edge_valid[96];
 static uint8_t shore_left, shore_right, shore_outer, shore_inner, shore_base, shore_color;
 static uint8_t keys[32], pads[40], inputs[2], previous_input, previous_keys;
+static uint8_t game_start_pending;
 uint8_t paused;
 static uint8_t switches=0x0b, palette_mask, palette_xor;
 uint8_t tank_track_phase;
@@ -520,6 +527,7 @@ static void refresh_palettes(void)
     /* The demo caption stays light gray when the screensaver changes hues. */
     palette_colors[2]=RGB(23,23,23); upload(XRAM_DEMO_FOOTER_PALETTE,palette_colors,14);
     palette_mask=G(0x86); palette_xor=G(0x85);
+    demo_splash_palette();
 }
 #pragma optimize(pop)
 static char mountain_pixel(uint8_t variant,uint8_t y,uint8_t x)
@@ -775,7 +783,10 @@ static void helicopter_shots_tick(uint8_t scroll)
         if (y<0 || y>=160) continue;
         s->direction=(OBJSTATE(n)&8)!=0;
         s->x=object_x(n)+(s->direction ? -6 : 6); s->y=y;
-        if (helicopter_water_at(s->x+2,y+1)) s->active=1;
+        if (helicopter_water_at(s->x+2,y+1)) {
+            s->active=1;
+            audio_enemy_shot(1);
+        }
     }
 }
 static void helicopter_shots_collisions(void)
@@ -809,14 +820,14 @@ static void helicopter_shots_render(void)
         s->size=0x01; s->options=0x42;
     }
 }
+/* Keep these helpers in main RAM; the auxiliary segment is almost full. */
+#pragma code-name(push, "CODE")
 static void clear_enemy_shots(void)
 {
     bank_tanks[0].shot_phase=bank_tanks[1].shot_phase=bank_tanks[2].shot_phase=0;
     memset(helicopter_shots,0,sizeof(helicopter_shots));
 }
-/* Interpolate the drop over the selected range, stopping at track height.
- * Use main RAM for this helper; the auxiliary segment is almost full. */
-#pragma code-name(push, "CODE")
+/* Interpolate the drop over the selected range, stopping at track height. */
 #pragma optimize(push, on)
 static uint8_t bank_shot_height(bank_tank_t *t)
 {
@@ -925,6 +936,7 @@ static void bank_tanks_tick(uint8_t scroll)
             if (!bank_choose_target(t)) {t->cooldown=8; continue;}
             t->shot_x=t->side ? t->x-6 : t->x+TANK_WIDTH-2;
             t->shot_phase=1; t->timer=0; t->cooldown=90;
+            audio_enemy_shot(0);
         }
     }
     /* Native blocks arrive every 32 rows. Separate tanks by at least two
@@ -1572,6 +1584,7 @@ static uint8_t configure_video(uint8_t restoring)
     static uint8_t y,i,x,bits;
     static sprite_t life_sprite;
     if (xreg(1,0,0,1)<0) return 0;
+    demo_splash_load();
     for (i=0;i<8;++i) tile_mirror[i]=i;
     for (i=0;i<7;++i) xram0_set(XRAM_TILES+(uint16_t)i*32,i*17,32);
     tile_mirror[TERRAIN_ROAD_UPPER]=TERRAIN_ROAD_UPPER;
@@ -1664,13 +1677,14 @@ static uint8_t configure_video(uint8_t restoring)
         render(); present_frame();
     }
     if (restoring && !audio_init()) return 0;
+    demo_splash_present();
     /* Capture the restored colors and blacken them before enabling planes. */
     game_fade_prepare();
     if (sound_status_init()<0 ||
         xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
         xreg(1,0,1,5,0x38,XRAM_SPRITES+sizeof(sprite_t),PLAYER_SPRITE-1,1,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
-        xreg(1,0,1,5,0x38,XRAM_SPRITES+PLAYER_SPRITE*sizeof(sprite_t),2,2,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
+        xreg(1,0,1,5,0x38,XRAM_FRONT_SPRITES,4,2,0,RIVER_TOP+RIVER_HEIGHT)<0 ||
         xreg(1,0,1,5,0x38,XRAM_HUD_SPRITES,HUD_SPRITE_COUNT,1,HUD_TOP,240)<0 ||
         xreg(1,0,1,5,0x38,XRAM_DUO_LIFE_SPRITES,DUO_LIFE_SPRITE_COUNT,2,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
@@ -1730,12 +1744,9 @@ int main(int argc,char** argv)
         if (changes&4) {
             start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
         }
-        if (changes&32) {
-            audio_muted^=1;
-            if (!audio_muted) sound_status_notify();
-        }
+        if (changes&32) sound_status_f9();
 #if RIVER_PCM
-        if ((changes&64) && !audio_muted) {
+        if ((changes&64) && audio_muted!=AUDIO_MUTE_ALL) {
             if (!audio_next()) return 1;
             sound_status_notify();
         }
@@ -1745,9 +1756,18 @@ int main(int argc,char** argv)
 #endif
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
+        if (changes&2) demo_splash_out=game_start_pending=0; /* F2 cancels a pending start. */
         if ((changes&4) ||
             ((input&START) && !(previous_input&START)) ||
             ((ready || MODE==255) && (input&FIRE) && !(previous_input&FIRE))) {
+            paused=0;
+            game_start_pending=1;
+            if (ready || MODE==255) {
+                demo_splash_start();
+            } else {G(0x282)&=~1; ready=0;}
+        }
+        if (demo_splash_out && demo_splash_done) {
+            demo_splash_out=0;
             G(0x282)&=~1; ready=0; paused=0;
         }
         previous_keys=controls;
@@ -1766,7 +1786,14 @@ int main(int argc,char** argv)
             G(0xe0)=0;
             PROFILE_PHASE(1);
             old_offset=OFFSET; old_intro=MODE; old_variant=VAR;
+            /* Launch after the native fly-in without synthesizing FIRE.
+             * Consume a held start/fire button until it is released. */
+            if (!ready && game_start_pending) {
+                G(0x22c)=G(0x22d)=128;
+                if (MODE==48) {MODE=0; G(0xb5)=64;}
+            }
             rr_step(); ++ticks; reflected=G(0xe0);
+            if (!ready && !MODE && !(input&FIRE)) game_start_pending=0;
             if (VAR!=2 && tank_bonus && (G(0x282)&1)) rr_tank_bonus();
             if (!(G(0x282)&1) || old_variant!=VAR) {
                 duo_started=duo_restart=0; memset(duo_players,0,sizeof(duo_players));

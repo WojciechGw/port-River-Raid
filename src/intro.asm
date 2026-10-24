@@ -66,8 +66,9 @@ intro_load:
     rts
 
 intro_init:
-    lda intro_active
-    ora _audio_muted
+    lda _audio_muted
+    and #1                   ; Bit 0 mutes music; bit 1 only mutes effects.
+    ora intro_active
     bne @done
     jmp player_init
 @done:

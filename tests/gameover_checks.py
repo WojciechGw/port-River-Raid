@@ -72,10 +72,10 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
     case('gameover-cancel-help',fixture+last+resume+[active+' 1','press f1',
         'wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5',
         active+' 0','press space','run 3',
-        'release space','wait xram:0x0080 82 240','run 3',active+' 1',kind+' 2'])
+        'release space','wait xram:0x0080 82 320','run 3',active+' 1',kind+' 2'])
 
     duo = boot + ['press f2','run 3','release f2','run 3']*2 + ['run 5',
-        'press space','run 140','release space','run 4',
+        'press space','run 136','release space','run 4',
         'press p','run 3','release p','run 3',poke(0xa0,[255]*6),poke(0x8e,[0]*6),
         poke(0x8b,[0,0]),poke(0xc6,0),poke(0xf8,[0]*4),
         poke(sym['duo_bridge'],0),poke(sym['duo_over'],0),poke(sym['duo_gap'],[0,0]),

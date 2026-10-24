@@ -31,10 +31,13 @@ static uint8_t shot_previous,shot_age=18;
 static uint16_t noise_rng=0x6502;
 static uint16_t synth_shot_step;
 static uint8_t synth_shot_volume;
+static uint8_t enemy_age=18,enemy_helicopter,enemy_volume,enemy_pending;
+static uint16_t enemy_step;
 static const uint8_t engine_volume[4]={4,4,7,5};
+extern uint8_t demo_splash_out,demo_splash_done;
 static const uint8_t opl_slot[9]={0,1,2,8,9,10,16,17,18};
 uint8_t opl_a[9],opl_b[9],opl_volume[9];
-/* OPL 0..3: engine, 4..6: blast, 7: missile, 8: fuel tone. */
+/* OPL 0..3: engine, 4..6: blast, 7: missile, 8: enemy shot / fuel tone. */
 #if RIVER_PCM
 void pcm_feed(void);
 void pcm_reset(void);
@@ -197,14 +200,34 @@ static void opl_update(uint8_t flight,uint8_t native_engine)
         opl_voice(n,hz,blast,6);
     }
     opl_voice(7,tone_hz(synth_shot_step),synth_shot_volume,0);
-    opl_voice(8,tone_hz(pcm_step[0]),pcm_tone[0] ? pcm_amplitude[0]>>1 : 0,0);
+    opl_voice(8,tone_hz(enemy_volume ? enemy_step : pcm_step[0]),
+        enemy_volume ? enemy_volume : pcm_tone[0] ? pcm_amplitude[0]>>1 : 0,0);
     opl_commit();
+}
+void __fastcall__ audio_enemy_shot(uint8_t helicopter)
+{
+    enemy_pending=helicopter+1;
 }
 void audio_update(uint8_t paused,uint8_t demo)
 {
     uint8_t n,ctrl,divider,volume,shot,engine,muted,flight;
-    if (gameover_update()) return;
-    muted=paused || demo || audio_muted;
+    n=gameover_update();
+    /* Starting/resuming music reinitializes audio. Consume this frame's
+     * launch afterwards, so the first shot is not lost to audio_stop(). */
+    if (enemy_pending) {
+        enemy_helicopter=enemy_pending-1; enemy_age=0; enemy_pending=0;
+    }
+    if (n) {enemy_age=18; return;}
+    muted=paused || demo || (audio_muted&AUDIO_MUTE_EFFECTS);
+    if (muted || G(0xc6)) enemy_age=18;
+    enemy_volume=0;
+    if (enemy_age<18) {
+        /* Same falling sweep as the player, one octave below / above it. */
+        enemy_step=missile_steps[enemy_age];
+        if (enemy_helicopter) enemy_step<<=1; else enemy_step>>=1;
+        enemy_volume=12-(enemy_age>>1);
+        ++enemy_age;
+    }
     shot=G(0xfb);
     if (muted || G(0xc6)
 #if RIVER_PCM
@@ -233,6 +256,15 @@ void audio_update(uint8_t paused,uint8_t demo)
 #endif
         pcm_amplitude[n]=muted ? 0 : volume*2;
     }
+    /* Only the departing splash gets an engine in demo. Keep native demo
+     * shots/blasts muted, and use the normal engine synth on either backend. */
+    if (demo && demo_splash_out && !demo_splash_done && !paused &&
+        !(audio_muted&AUDIO_MUTE_EFFECTS)) {
+        flight=engine=1;
+        pcm_tone[0]=0;
+        pcm_step[0]=steps[0][31-(G(0xb5)>>4)];
+        pcm_amplitude[0]=engine_volume[G(0x84)&3]*2;
+    }
     if (
 #if RIVER_PCM
         audio_backend!=AUDIO_PCM &&
@@ -241,7 +273,14 @@ void audio_update(uint8_t paused,uint8_t demo)
         synth_shot_step=missile_steps[shot_age++]; synth_shot_volume=15;
     }
 #if RIVER_PCM
-    if (audio_backend==AUDIO_PCM) pcm_feed();
+    if (audio_backend==AUDIO_PCM) {
+        /* Borrow the engine/fuel voice, never a crash or the player's shot. */
+        if (enemy_volume && (engine || pcm_tone[0])) {
+            pcm_tone[0]=1; pcm_step[0]=enemy_step;
+            pcm_amplitude[0]=enemy_volume*2;
+        }
+        pcm_feed();
+    }
     else
 #endif
         opl_update(flight,engine);
@@ -249,6 +288,7 @@ void audio_update(uint8_t paused,uint8_t demo)
 }
 void audio_stop(void)
 {
+    enemy_age=18;
     gameover_stop();
 #if RIVER_PCM
     if (audio_backend==AUDIO_PCM) xreg(0,1,2,0xffff);
