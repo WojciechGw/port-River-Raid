@@ -35,22 +35,31 @@ Each small, medium, and large impact circle is erased before the next phase.
 Tank rounds can also destroy FUEL depots, without awarding player points.
 The panel shows the score, fuel,
 player, game variation, bridge number, session high score (HI), and reserve
-planes. Audio offers PSG, OPL2 and PCM backends, guided by an Atari XL/XE
-recording. Speed and throttle control the engine sound. PSG and PCM change
+planes. Audio uses OPL2 by default; the optional PCM build offers both backends, guided by an Atari XL/XE
+recording. Speed and throttle control the engine sound. PCM changes
 its noise bandwidth; OPL2 uses continuous broadband feedback noise with
 throttle-controlled volume to avoid pitched FM hum and beating.
-PSG uses eight oscillators and OPL2 nine channels to keep the engine playing
+OPL2 uses nine channels to keep the engine playing
 alongside shots, blasts and fuel tones. Missiles descend in
 pitch, and explosions have a low body rather than metallic percussion.
-Attract mode is silent. Colors and audio remain approximations. Compatibility and limitations
+Attract mode plays the flight arrangement. Colors and audio remain approximations. Compatibility and limitations
 are described in [PORTING.md](PORTING.md).
 
-The startup cover plays the OPL2 melody and PCM drums from the firmware's
+The music is based on the OPL2 melody and PCM drums from the firmware's
 `tests/gen/riverraid_rom_gen.py --bpm 140`. Its eight-bar loop lasts 13.696 seconds
-at the generator's actual tempo of 140.186916 BPM. It stops when the cover
-finishes fading out; the manual remains silent. The intro uses OPL2 plus PCM
-regardless of the gameplay audio option, then restores the selected backend.
-Firmware without PCM plays the OPL2 part alone. Notes and instruments are in
+at the generator's actual tempo of 140.186916 BPM. It plays on the cover,
+instructions/F1 and farewell screen. Mode selection, demo and gameplay use a
+quieter variation of the same theme, with syncopated bass, an alternating lead
+register and answering arpeggios. It keeps the same tempo and loop length.
+`tools/make_music.py` builds this arrangement and its percussion from the source
+score. Engine, shots, explosions and fuel warnings continue alongside it.
+On exit, both OPL2 and PCM fade out with the farewell picture. F9 mute also
+applies to music. In the PCM build, music uses OPL2 plus PCM when the firmware
+supports PCM, regardless of the gameplay option. The default OPL2 build plays
+both melody and synthesized percussion through OPL2. The same arrangement is
+used when PCM firmware support is unavailable, including victory and game-over jingles.
+The reduced arrangement reserves voices for effects; effects take priority
+over the engine when the fallback's shared voices are busy. Notes and instruments are in
 `src/intro-score.json`; `assets/intro-drums.pcm` holds the generated percussion.
 To reimport: `python tools/import_intro.py path/to/riverraid_rom_gen.py --bpm 140`.
 
@@ -58,7 +67,7 @@ Losing the last plane plays the OPL2 + PCM arrangement from
 `riverraid_gameover_rom_gen.py --bpm 200`, including its final slowdown and decay
 (6.704 seconds). GAME 1 triggers it when the player runs out of planes;
 GAME 2 and GAME 3 wait until both players run out. The jingle respects mute and
-restores the selected gameplay audio backend when finished.
+returns to the flight arrangement after the jingle.
 To reimport: `python tools/import_gameover.py path/to/riverraid_gameover_rom_gen.py --bpm 200`.
 
 Destroying a bridge while the HUD shows BRIDGE 5, 20 or 50 plays the OPL2 + PCM victory fanfare from
@@ -92,14 +101,14 @@ Select GAME 3 with F2 and start with Space or Enter.
 Requirements: CMake 3.21+, Ninja, Python 3, and cc65 with the `rp6502` target.
 SDK installation instructions: https://picocomputer.github.io/sdk.html
 
-PSG and OPL2 use the standard RIA sound interfaces. Only PCM requires the
+OPL2 uses the standard RIA sound interface. Only PCM requires the
 firmware extension `XREG(0,1,2,base)`. Building this game does not update
 firmware on the physical computer. See [PORTING.md](PORTING.md) for details.
 
-Choose audio when loading the game on the computer:
+The default build uses OPL2 for all music, percussion and effects.
+In the optional PCM build, choose gameplay audio when loading the game:
 
 ```text
-load riverraid.rp6502 /psg
 load riverraid.rp6502 /opl2
 load riverraid.rp6502 /pcm
 ```
@@ -108,7 +117,7 @@ No parameter selects OPL2. `/auto` selects PCM when supported, otherwise OPL2.
 Explicit `/pcm` reports an error if the firmware lacks PCM.
 Options are case insensitive; if several audio backends are supplied, the last one wins.
 Add `/v` (for example, `load riverraid.rp6502 /opl2 /v`) to show the sound
-icon and PSG/OPL/PCM label in the bottom-right corner below the scroller.
+icon and OPL/PCM label in the bottom-right corner below the scroller.
 Without `/v`, a crossed-out note appears when F9 has muted sound. Unmuting
 with F9 or switching with F10 shows the selected backend for one second, aligned with the right screen
 edge. The note moves to its left while the label is visible. F10 is ignored while muted.
@@ -126,9 +135,29 @@ cmake --build --preset cc65/Release
 ```
 
 The artifact name `riverraid` retains the project's existing target name.
+The default `cc65/Release` and `cc65/Debug` presets set `RIVER_PCM=OFF`.
+Their ROM omits PCM samples, hybrid scores and PCM playback/mixing code.
+F10 has no action and is omitted from help and the `assets/manualOPL.bmp`
+keyboard screen. F9 still mutes all sound. `/auto` and `/opl2` select OPL2;
+`/pcm` is rejected.
+
+To build the full OPL2 + PCM version in a separate directory:
+
+```powershell
+cmake --preset cc65/Release-PCM
+cmake --build --preset cc65/Release-PCM
+.\tools\rp6502-emu.exe .\build\cc65\release-pcm\riverraid.rp6502
+```
+
+The PCM preset sets `RIVER_PCM=ON` and restores F10 and `/pcm`.
+The existing `cc65/Release-OPL2` preset remains available in `build/cc65/release-opl2`.
+Any cc65 configuration can use `-DRIVER_PCM=OFF` or `-DRIVER_PCM=ON`;
+PCM is disabled by default. Re-run `cmake --preset cc65/Release` when updating
+an existing build directory to replace its cached PCM setting.
+
 In VS Code, select the `cc65/Release` preset, the `riverraid` target, and the
 `RP6502-EMU` launch configuration. F5 starts the emulator with debugger support.
-Source symbols are available in both presets. Both use compact optimized C
+Source symbols are available in all cc65 presets. They use compact optimized C
 code to fit the 64 KiB memory map, including GAME 3 DUO.
 
 The port uses ca65. The llvm-mos presets from the old template are currently
@@ -147,8 +176,8 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |
-| F9 | Sound on / off (all sounds); when enabling sound, show PSG/OPL/PCM for 1 second |
-| F10 | When unmuted, cycle PSG → OPL2 → PCM → PSG; show PSG/OPL/PCM for 1 second; skip PCM if unsupported |
+| F9 | Sound on / off (all sounds); when enabling sound, show OPL/PCM for 1 second |
+| F10 | When unmuted, switch OPL2 ↔ PCM; show OPL/PCM for 1 second; stay on OPL2 if PCM is unsupported |
 | P | Pause |
 | R | Start a new game at the bridge selected with F3 |
 | Escape | Farewell screen, then exit to the console |
@@ -209,8 +238,7 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 ## Source code
 
 - `src/main.c`: RIA/VGA configuration, raster rendering, input, and collisions.
-- `src/audio.c`: command-line audio selection, PSG layers and OPL2 FM patches.
-- `src/engine.asm`: timer-clocked noise with linear amplitude quantization for the PSG engine, independent of PCM.
+- `src/audio.c`: command-line audio selection and OPL2 FM patches.
 - `src/audio.asm`: clocked noise, tones and streaming PCM ring producer.
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.
@@ -221,8 +249,8 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 - `tools/port_original.py`: automatic DASM-to-ca65 translation and selection
   of the original routines. Generates `original_core.asm` in the build directory.
 - `tools/make_cover.py`: converts cover/manual/outro BMPs and prepares fade palettes.
-- `tools/preview_audio.py`: offline PCM/PSG listening previews from captured parameters.
-- `tools/preview_synth.py`: PSG/OPL register-trace WAV previews and spectral/Haar measurements.
+- `tools/preview_audio.py`: offline PCM listening previews from captured parameters.
+- `tools/preview_synth.py`: OPL register-trace WAV previews and spectral/Haar measurements.
 - `tools/compare_synth.py`: preview signal checks and an optional RMS-matched XL/XE comparison.
 - `tools/opl_preview.c`: optional native shim for the firmware's emu8950 preview model.
 - `tools/analyze_audio.py`: WAV spectral measurements and spectrograms.

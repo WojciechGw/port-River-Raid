@@ -61,7 +61,7 @@ def compile_score(score):
             data.extend(command)
         cursor = frame
     data.append(0xff)
-    assert len(data) <= 0xf00, f"Intro score exceeds cover scratch XRAM: {len(data)}"
+    assert len(data) <= 0x700, f"Intro score exceeds music scratch XRAM: {len(data)}"
     return data
 
 
@@ -76,6 +76,7 @@ def main():
     args.output.write_bytes(data)
     if args.include:
         args.include.write_text(f"INTRO_RATE = {score['sample_rate']}\n"
+            f"INTRO_SCORE_BYTES = {len(data)}\n"
             f"INTRO_STEP_SAMPLES = {score['samples_per_step']}\n"
             f"INTRO_DRUM_PAGES = {score['samples_per_step']*score['steps']//256}\n")
     print(f"OPL2 + PCM intro: {score['bpm']:.6f} BPM, {len(data)} score bytes")

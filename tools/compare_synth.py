@@ -1,4 +1,4 @@
-"""Check rendered PSG/OPL previews and optionally build a reference comparison.
+"""Check rendered OPL previews and optionally build a reference comparison.
 
 Run preview_synth.py first. These are model-based checks, not recordings of
 the emulator's sound device. The optional reference is an external PCM16 WAV;
@@ -64,7 +64,7 @@ def main():
     args=parser.parse_args()
     report={}
     audio={}
-    for backend in ('psg','opl2'):
+    for backend in ('opl2',):
         for name in ('engine-slow','engine-fast','explosion','missile','overlap','all-voices'):
             rate,samples=read_mono(args.previews/f'audio-{backend}-{name}.wav')
             assert rate==RATE
@@ -72,20 +72,14 @@ def main():
             assert metrics['rms']>100 and metrics['clipped_samples']==0, f'{backend}/{name}: silence or clipping'
             if name.startswith('engine'):
                 metrics['largest_fft_bin_fraction']=round(peak_fraction(samples),4)
-                if backend=='psg':
-                    low,high=(350,950) if name.endswith('slow') else (1400,2200)
-                    assert low<metrics['rolloff90_hz']<high, f'{backend}/{name}: wrong noise bandwidth'
-                    assert metrics['largest_fft_bin_fraction']<.15, f'{backend}/{name}: dominant fixed engine tone'
-                    assert metrics['above_5khz']<.04, f'{backend}/{name}: excessive hiss'
-                else:
-                    # OPL now deliberately uses broadband feedback noise;
-                    # the former low FM bands retained audible engine notes.
-                    assert 18000<metrics['rolloff90_hz']<24000, f'{backend}/{name}: narrow/tonal noise'
-                    assert metrics['largest_fft_bin_fraction']<.03, f'{backend}/{name}: fixed tone/hum'
-                    metrics['short_time_peak_fraction']=round(short_time_peak_fraction(samples),4)
-                    assert metrics['short_time_peak_fraction']<.035, f'{backend}/{name}: moving tonal engine components'
-                    metrics['envelope_variation']=round(envelope_variation(samples),4)
-                    assert metrics['envelope_variation']<.05, f'{backend}/{name}: engine beating/tremolo'
+                # OPL now deliberately uses broadband feedback noise;
+                # the former low FM bands retained audible engine notes.
+                assert 18000<metrics['rolloff90_hz']<24000, f'{backend}/{name}: narrow/tonal noise'
+                assert metrics['largest_fft_bin_fraction']<.03, f'{backend}/{name}: fixed tone/hum'
+                metrics['short_time_peak_fraction']=round(short_time_peak_fraction(samples),4)
+                assert metrics['short_time_peak_fraction']<.035, f'{backend}/{name}: moving tonal engine components'
+                metrics['envelope_variation']=round(envelope_variation(samples),4)
+                assert metrics['envelope_variation']<.05, f'{backend}/{name}: engine beating/tremolo'
             if backend=='opl2' and name=='explosion':
                 assert 550<metrics['rolloff90_hz']<1300 and metrics['above_5khz']<.02, 'Metallic/trebly OPL blast'
             audio[backend,name]=samples
@@ -93,11 +87,8 @@ def main():
             print('PASS',backend,name,{k:v for k,v in metrics.items() if k!='haar'})
         slow=report[backend+'-engine-slow']['rolloff90_hz']
         fast=report[backend+'-engine-fast']['rolloff90_hz']
-        if backend=='psg':
-            assert fast>slow*1.5, f'{backend}: insufficient throttle response'
-        else:
-            assert report[backend+'-engine-fast']['rms']>report[backend+'-engine-slow']['rms']*1.5, \
-                'OPL engine volume does not respond to throttle'
+        assert report[backend+'-engine-fast']['rms']>report[backend+'-engine-slow']['rms']*1.5, \
+            'OPL engine volume does not respond to throttle'
 
     if args.reference:
         rate,reference=read_mono(args.reference)
@@ -108,7 +99,6 @@ def main():
             ref=resample(reference[round(start*rate):round(end*rate)],rate)
             report['reference-'+name]=measure(ref)
             for label,samples in ((name+' reference',ref),
-                                  (name+' PSG model',audio['psg',name][:len(ref)]),
                                   (name+' OPL2 model',audio['opl2',name][:len(ref)])):
                 mean=sum(samples)/len(samples)
                 rms=math.sqrt(sum((v-mean)**2 for v in samples)/len(samples))

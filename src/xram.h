@@ -22,11 +22,6 @@ typedef struct {
     uint16_t image, palette;
     uint8_t size, options;
 } sprite_t;
-typedef struct {
-    uint16_t freq;
-    uint8_t duty, attack, decay, release_wave, pan_gate, reserved;
-} oscillator_t;
-
 #define XRAM_KEYBOARD 0x0000
 #define XRAM_GAMEPADS 0x0020
 /* Observable state for scripted emulator checks; see tests/README.md. */
@@ -37,12 +32,12 @@ typedef struct {
  * The cover uses $0280 config, $0400 palette, $0600 staging and $1000..$F0FF
  * pixels before game initialization and after audio stops on exit. */
 #define XRAM_COVER_STATE 0x00B0
-/* Startup-only OPL/PCM and score. Shared helpers borrow reset_tiles;
+/* Full-screen OPL/PCM and score. Shared helpers borrow reset_tiles;
  * the player borrows 1024 bytes of derived graphics tables at sprites.
- * All are released/rebuilt before gameplay; F1 loads only shared helpers. */
+ * These are rebuilt before gameplay and when returning from F1. */
 #define XRAM_INTRO_OPL 0x0100
 #define XRAM_INTRO_PCM 0x09F8
-#define XRAM_INTRO_SCORE 0xF100
+#define XRAM_INTRO_SCORE 0xF900
 /* Scene: 0 cover, 1 outro, 2 manual. */
 #define XRAM_COVER_SCENE 0x00B4
 /* F1 return data, above the last manual pixel ($F0FF). */
@@ -51,7 +46,8 @@ typedef struct {
 #define HELP_VIDEO_BYTES 0x700
 _Static_assert(XRAM_HELP_TERRAIN_COLORS + 192 <= XRAM_HELP_VIDEO, "Help backup overlaps");
 _Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= 65536UL, "Help backup exceeds XRAM");
-/* Game fade: level 0 black .. 32 full, then VSYNC; startup-only scratch. */
+_Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= XRAM_INTRO_SCORE, "Help backup overlaps music score");
+/* Startup/F1 return fade: level 0 black .. 32 full, then VSYNC. */
 #define XRAM_GAME_FADE_LEVEL 0x00B2
 #define XRAM_GAME_FADE_SOURCE 0xD000
 #define XRAM_GAME_FADE_STAGING 0xD300
@@ -61,12 +57,17 @@ _Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= 65536UL, "Help backup excee
 #define XRAM_COVER_PROMPT_PALETTE 0x0850
 #define XRAM_OUTRO_PROMPT_IMAGE 0x0900
 #define XRAM_PALETTE 0x0100
-#define XRAM_PSG 0x0180
 /* PCM extension: mono signed 8-bit, 8000 Hz, 2048-byte ring after header.
  * Initialized after the cover, whose pixels temporarily occupy this space. */
 #define XRAM_PCM 0xC000
 /* OPL2 reuses this page only when PCM is not selected. */
 #define XRAM_OPL XRAM_PCM
+/* Music has its own OPL mirror and 16 kHz PCM ring. Procedural PCM
+ * effects are consumed from XRAM_PCM and mixed into each published page. */
+#define XRAM_MUSIC_SYNTH 0xC900
+#define XRAM_MUSIC_PCM 0xCA00
+_Static_assert(XRAM_PCM + 8 + 2048 <= XRAM_MUSIC_SYNTH, "Effects overlap music");
+_Static_assert(XRAM_MUSIC_PCM + 8 + 1024 <= XRAM_GAME_FADE_SOURCE, "Music overlaps fade");
 _Static_assert(XRAM_PCM + 64 + 2048 <= XRAM_GAME_FADE_SOURCE, "Fade overlaps audio");
 _Static_assert(XRAM_GAME_FADE_SOURCE + 576 <= XRAM_GAME_FADE_STAGING, "Fade buffers overlap");
 _Static_assert(XRAM_GAME_FADE_STAGING + 576 <= 65536UL, "Fade scratch overflow");
@@ -160,10 +161,8 @@ _Static_assert(XRAM_SOUND_ICON_CONFIG + sizeof(bitmap_config_t) <= XRAM_HUD_BITM
 _Static_assert(XRAM_SOUND_ICON + 8 == XRAM_SOUND_TEXT, "Sound icon must precede text");
 _Static_assert(XRAM_SOUND_TEXT + 4 <= XRAM_SPRITES, "Sound text overlaps sprites");
 _Static_assert(sizeof(sprite_t) == 10, "PIX sprite layout");
-_Static_assert(sizeof(oscillator_t) == 8, "PIX PSG layout");
 _Static_assert(XRAM_GAME2_LIFE_PALETTE >= XRAM_SPRITE_PALETTES + 11 * 32, "GAME 2 life palette overlaps objects");
 _Static_assert(XRAM_GAME2_LIFE_PALETTE + 11 * 2 == XRAM_JET_PALETTE + 2, "GAME 2 lives must share jet ink");
-_Static_assert(XRAM_PSG % 256 + 64 <= 256, "PSG page boundary");
 _Static_assert(XRAM_TERRAIN + TERRAIN_COLUMNS * RIVER_RING <= XRAM_TILES, "Terrain overlaps tiles");
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_IMAGES, "Tiles overlap sprites");
 _Static_assert(XRAM_TILES + TERRAIN_TILE_COUNT * 32 <= XRAM_LOGO_IMAGE, "Tiles overlap logo");

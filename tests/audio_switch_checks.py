@@ -12,11 +12,11 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
              'release f1','wait xram:0x02a4 222 5']
     closing=['press space','run 3','release space','wait xram:0x0080 82 240','run 3']
 
-    for option,initial in (('psg',1),('opl2',2),('pcm',3)):
+    for option,initial in (('opl2',2),('pcm',3)):
         commands=fixture+['dump 0x80 128']
         current=initial
         for _ in range(6):
-            current=current%3+1
+            current=5-current
             commands+=['press f10','run 3',backend+f' {current}',
                        enabled+f' {int(current==3)}','run 12',backend+f' {current}',
                        'release f10','run 3',amplitudes]
@@ -28,7 +28,7 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         assert all(not any(a) for a in data[1:7]), 'Switching audio broke pause silence'
         assert any(data[9]), 'Selected backend did not resume sound'
 
-    # Exercise switching while flying, including F9 and a second PSG IRQ setup.
+    # Exercise switching while flying, including F9 and repeated returns to each backend.
     for duo in (False,True):
         if duo:
             setup=start+['press f2','run 3','release f2','run 8',
@@ -46,7 +46,7 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         assert all(not any(a) for a in data[:-1]) and any(data[-1])
 
     # The one-second notice also expires while the game is paused.
-    for option,current,label in (('psg',2,b'OPL '),('opl2',3,b'PCM '),('pcm',1,b'PSG ')):
+    for option,current,label in (('opl2',3,b'PCM '),('pcm',2,b'OPL ')):
         _,data=case(f'f10-notice-one-second-{option}',fixture+tap+[
             backend+f' {current}', 'dump xram:0x0220 30', 'dump xram:0x02c8 4',
             f'shot "{(output / f"f10-notice-{option}.png").as_posix()}"',
@@ -60,17 +60,17 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
         assert data[1:]==[label,label,b'    ']
 
     _,data=case('f10-notice-refresh',fixture+tap+['run 30']+tap+[
-        backend+' 1','run 30','dump xram:0x02c8 4','run 20',
+        backend+' 2','run 30','dump xram:0x02c8 4','run 20',
         'dump xram:0x02c8 4','run 10','dump xram:0x02c8 4'])
-    assert data==[b'PSG ',b'PSG ',b'    ']
+    assert data==[b'OPL ',b'OPL ',b'    ']
     _,data=case('f10-hold-does-not-refresh',fixture+[
         'press f10','run 3',backend+' 3','dump xram:0x02c8 4',
         'run 70',backend+' 3','dump xram:0x02c8 4',
-        'release f10','run 3','press f10','run 3',backend+' 1',
+        'release f10','run 3','press f10','run 3',backend+' 2',
         'release f10','run 3','dump xram:0x02c8 4'])
-    assert data==[b'PCM ',b'    ',b'PSG ']
+    assert data==[b'PCM ',b'    ',b'OPL ']
 
-    for option,current,label in (('psg',1,b'PSG '),('opl2',2,b'OPL '),('pcm',3,b'PCM ')):
+    for option,current,label in (('opl2',2,b'OPL '),('pcm',3,b'PCM ')):
         _,data=case(f'f9-unmute-notice-{option}',fixture+[
             'press f9','run 3','release f9','run 3',muted+' 1',
             'dump xram:0x02c0 8','dump xram:0x02c8 4',
@@ -85,23 +85,22 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
 
     # This emulator always supports PCM. Simulate the capability probe's
     # negative return, without changing production code or CLI options.
-    commands=fixture+[poke(sym['try_pcm'],[0xa9,0,0xa2,0,0x60])]
-    for current in (1,2,1,2,1):
+    commands=fixture+[poke(sym['try_pcm'],[0xa9,0,0xa2,0,0x60]),
+                      poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60])]
+    for current in (2,2,2,2,2):
         commands+=tap+[backend+f' {current}',enabled+' 0']
-    commands+=opening+closing+[backend+' 1']+resume+['run 4',amplitudes,
+    commands+=opening+closing+[backend+' 2']+resume+['run 4',amplitudes,
+        f'peek 0x{sym["music_synth"]:04x} 1',
         'expect-not "PCM requires firmware"']
+    for current,music_synth in ((2,1),(2,1)):
+        commands+=tap+['run 4',backend+f' {current}',
+            f'peek 0x{sym["music_synth"]:04x} {music_synth}',
+            f'peek 0x{sym["gameover_active"]:04x} 1']
     _,data=case('f10-skips-unavailable-pcm',commands)
-    assert any(data[0]), 'Fallback to PSG left audio silent'
+    assert any(data[0]), 'OPL fallback left audio silent'
 
-    ticks=f'dump 0x{sym["engine_ticks"]:04x} 2'
-    _,data=case('f10-live-audible-and-timer',fixture+resume+[
-        'press down']+tap+[backend+' 3',amplitudes]+tap+[
-        backend+' 1','run 8',amplitudes,ticks,'run 8',ticks]+
-        tap+[backend+' 2',amplitudes,ticks,'run 8',ticks,
-             'dump xram:0x0180 64','dump xram:0xc000 256']+
-        tap+tap+[backend+' 1','run 8',ticks,'run 8',ticks])
-    assert all(any(data[n]) for n in (0,1,4)), 'An audible backend switch went silent'
-    assert data[2]!=data[3] and data[5]==data[6], 'PSG timer was not started/stopped'
-    assert all(not (data[7][n*8+6]&1) for n in range(8)), 'PSG still plays under OPL'
-    assert any(data[8][0xb0+n]&32 for n in range(9)), 'OPL did not resume'
-    assert data[9]!=data[10], 'Returning to PSG did not restart its engine timer'
+    _,data=case('f10-live-audible',fixture+resume+['press down']+tap+[
+        backend+' 3',amplitudes]+tap+[backend+' 2',amplitudes,
+        'dump xram:0xc000 256']+tap+tap+[backend+' 2',amplitudes])
+    assert all(any(data[n]) for n in (0,1,3)), 'An audible backend switch went silent'
+    assert any(data[2][0xb0+n]&32 for n in range(9)), 'OPL did not resume'

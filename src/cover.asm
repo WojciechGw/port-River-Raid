@@ -7,7 +7,7 @@
 .export _show_cover, _show_outro, _show_manual
 .import _reset_tiles, intro_init, intro_tick, intro_stop, intro_load
 .export boot_open, boot_close, boot_read_xram, boot_fd
-.export boot_scene
+.export boot_scene, boot_help, boot_level
 .segment "SPLASH"
 
 COVER_CONFIG  = $0280

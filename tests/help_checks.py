@@ -4,6 +4,43 @@ import re
 from pathlib import Path
 
 
+def run_help_fade_checks(case,sym,boot,output):
+    palette_ranges=((0x0100,32),(0x0400,512),(0x0700,14),(0x0720,14),(0xbf80,4))
+    palette_dump=[f'dump xram:0x{address:04x} {size}' for address,size in palette_ranges]
+    state_dump=['dump 0x80 128',f'dump 0x{sym["duo_players"]:04x} 46']
+    pause=['press p','run 3','release p','run 3']
+    for variant in range(3):
+        for mono in (False,True):
+            name=f'help-fade-game{variant+1}-'+('mono' if mono else 'color')
+            commands=boot+['press f2','run 3','release f2','run 8']*variant
+            if mono: commands+=['press f4','run 3','release f4','run 3']
+            commands+=['press space','run 140','release space','run 4']+pause
+            commands+=palette_dump+state_dump+['mark','press f1',
+                'wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5',
+                'press z','run 3','release z','wait xram:0x00b0 0 120',
+                'wait xram:0x00b2 0 160']
+            for level in range(33):
+                if level: commands+=[f'wait xram:0x00b2 {level} 3']
+                commands+=['dump xram:0x00b3 1']+palette_dump+state_dump
+                if level in (0,16,32):
+                    commands+=[f'shot "{(output/f"{name}-{level}.png").as_posix()}"']
+            commands+=['wait xram:0x0080 82 10','run 3','expect-same',
+                'peek xram:0x008b 1']+pause+['run 10','dump 0x80 128']
+            _,buffers=case(name,commands,rom_args=('/v',))
+            words=struct.unpack('<288H',b''.join(buffers[:5]))
+            state=buffers[5:7]
+            times=[]
+            for level in range(33):
+                offset=7+level*8
+                times.append(buffers[offset][0])
+                expected=struct.pack('<288H',*((c&32)|((c&31)*level//32)|
+                    ((((c>>6)&31)*level//32)<<6)|((((c>>11)&31)*level//32)<<11) for c in words))
+                assert b''.join(buffers[offset+1:offset+6])==expected, f'{name}: palette level {level}'
+                assert buffers[offset+6:offset+8]==state, f'{name}: game advanced during fade'
+            assert all((b-a)&255==2 for a,b in zip(times[1:],times[2:])), 'Uneven fade cadence'
+            assert buffers[-1]!=state[0], 'Game did not resume after fade/pause'
+
+
 def run_life_hud_checks(case, sym, boot, output):
     icons=['dump xram:0x0600 190']
     help_roundtrip=['press f1','wait xram:0x00b0 2 120','release f1',
@@ -26,6 +63,7 @@ def run_life_hud_checks(case, sym, boot, output):
 
 
 def run_help_checks(case, sym, boot, output):
+    run_help_fade_checks(case,sym,boot,output)
     run_life_hud_checks(case,sym,boot,output)
     # Use the editable artwork as the reference, so drawing a new note does
     # not require duplicating its pixels in this renderer integration check.
@@ -51,9 +89,11 @@ def run_help_checks(case, sym, boot, output):
         'poke 0xb3 4']+pause+['wait 0xf4 1 240','wait 0xc6 48 300','run 3']+
         pause+hud_dump+[
         f'shot "{(output / "game2-hud-p2.png").as_posix()}"',
-        'press f4','run 3','release f4','run 3']+hud_dump+
-        ['mark']+opening+closing+['expect-same']+hud_dump)
-    for turn,player in enumerate((0,1,1,1)):
+        'press f4','run 3','release f4','run 3']+pause+pause+['peek 0x86 15']+hud_dump+
+        [f'shot "{(output / "game2-hud-p2-mono.png").as_posix()}"',
+         'mark']+opening+closing+['expect-same']+hud_dump+[
+        'press f4','run 3','release f4','run 3']+pause+pause+['peek 0x86 255']+hud_dump)
+    for turn,player in enumerate((0,1,1,1,1)):
         palette,life_palette,sprites,bitmap,active=hud[turn*5:turn*5+5]
         assert active==bytes((player,))
         assert palette[16:18]==life_palette[22:24], 'Score differs from jet color'
@@ -63,8 +103,21 @@ def run_help_checks(case, sym, boot, output):
         label=[b for y in range(6,12) for b in bitmap[y*160+12:y*160+20]]
         assert 0x88 in label and all((b>>4) in (8,10) and (b&15) in (8,10) for b in label)
         assert 0x88 in bitmap[5*160+26:11*160], 'Score ink missing'
+        ink=int.from_bytes(palette[16:18],'little')
+        if turn in (2,3):
+            assert (ink&31)==((ink>>6)&31)==(ink>>11), 'P2 HUD remains colored in mono'
+        elif turn in (1,4):
+            assert ink==0xffe0, 'P2 cyan not restored in color mode'
     assert hud[1][22:24]!=hud[6][22:24], 'P1 and P2 should have different colors'
     assert hud[5][22:24]==hud[0][22:24], 'Turn change altered BRIDGE color'
+    _,mono=case('game2-select-after-mono',boot+[
+        'press f4','run 3','release f4','run 3',
+        'press f2','run 3','release f2','run 8',
+        'peek 0x86 15','peek 0xf4 1']+hud_dump+[
+        f'shot "{(output / "game2-selection-mono.png").as_posix()}"'])
+    ink=int.from_bytes(mono[0][16:18],'little')
+    assert (ink&31)==((ink>>6)&31)==(ink>>11), 'Selecting GAME 2 restored P2 cyan in mono'
+    assert mono[0][16:18]==mono[1][22:24], 'P2 label/score and life colors differ'
     for variant,verbose in ((v,verbose) for v in range(3) for verbose in (False,True)):
         suffix='' if verbose else '-quiet'
         options=(('/opl2','/V') if variant==1 else ('/v','/opl2')) if verbose else ()
@@ -100,7 +153,7 @@ def run_help_checks(case, sym, boot, output):
         select = boot + [cmd for _ in range(variant) for cmd in
                          ("press f2", "run 3", "release f2", "run 8")]
         start = select + ["press space", "run 140", "release space", "run 4"]
-        for backend in (("pcm", "opl2", "psg") if variant==0 else ("pcm",)):
+        for backend in (("pcm", "opl2") if variant==0 else ("pcm",)):
             _, buffers = case(f"help-resume-game{variant+1}-{backend}",
                 start+pause+snapshot+["mark"]+opening+[
                     f'shot "{(output / f"help-game{variant+1}.png").as_posix()}"'
@@ -150,9 +203,8 @@ def run_help_checks(case, sym, boot, output):
         select=boot+[cmd for _ in range(variant) for cmd in
                      ('press f2','run 3','release f2','run 8')]
         start=select+['press space','run 140','release space','run 4']
-        for backend in ('psg','opl2','pcm'):
+        for backend in ('opl2','pcm'):
             sound_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
-                        'dump xram:0x0180 64' if backend=='psg' else
                         'dump xram:0xc000 256' if backend=='opl2' else
                         'dump xram:0xc000 8']
             flag=f'peek 0x{sym["audio_muted"]:04x}'
@@ -173,9 +225,6 @@ def run_help_checks(case, sym, boot, output):
             assert any(amplitudes[0]) and any(amplitudes[4]), 'F9 did not restore sound'
             assert all(not any(a) for a in amplitudes[1:4]), 'Muted effects remain audible'
             registers=buffers[1::2]
-            if backend=='psg':
-                assert all(not (s[n*8+6]&1) for s in registers[1:4] for n in range(8))
-                assert any(registers[4][n*8+6]&1 for n in range(8))
-            elif backend=='opl2':
+            if backend=='opl2':
                 assert all(not (s[0xb0+n]&32) for s in registers[1:4] for n in range(9))
                 assert any(registers[4][0xb0+n]&32 for n in range(9))

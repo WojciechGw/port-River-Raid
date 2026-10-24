@@ -1,7 +1,7 @@
 .include "rp6502.inc"
 .export _game_fade_capture, _game_fade_publish
 .export _game_fade_read
-.segment "STARTUP_AUDIO"
+.segment "CODE"
 
 ; Exactly two portal reads; avoid cc65 reloading a volatile low byte while
 ; assembling a 16-bit C expression, which advances the XRAM stream twice.
@@ -60,7 +60,7 @@ fade_address:
     ldy fade_words,x
     rts
 
-.segment "STARTUP_AUDIO"
+.segment "RODATA"
 fade_low:   .byte $00,$00,$00,$20,$80
 fade_high:  .byte $01,$04,$07,$07,$bf
 fade_words: .byte 16,0,7,7,2

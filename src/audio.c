@@ -16,34 +16,31 @@ static const uint16_t steps[3][32]={
 static const uint16_t missile_steps[18]={
     6554,6190,5864,5571,5305,5064,4844,4642,4456,4285,4126,3979,3842,3714,3594,3482,3376,3277
 };
-static const uint8_t attenuation[16]={15,13,11,9,7,6,5,4,3,3,2,1,1,1,0,0};
 /* YM3812 total level is 0.75 dB per step; match the native linear volume. */
 static const uint8_t opl_level[16]={63,33,25,20,16,13,11,9,8,6,5,4,3,2,1,0};
-uint8_t audio_backend,pcm_enabled,pcm_amplitude[2],pcm_tone[2];
+/* Native effect parameters are shared by OPL2 and the optional PCM synth. */
+uint8_t audio_backend,pcm_amplitude[2],pcm_tone[2];
+#if RIVER_PCM
+uint8_t pcm_enabled;
+static uint8_t requested=AUDIO_OPL2;
+#endif
 uint8_t audio_muted;
 uint8_t sound_verbose;
 uint16_t pcm_step[2];
-static uint8_t requested=AUDIO_OPL2,shot_previous,shot_age=18;
-static oscillator_t psg[8];
+static uint8_t shot_previous,shot_age=18;
 static uint16_t noise_rng=0x6502;
 static uint16_t synth_shot_step;
 static uint8_t synth_shot_volume;
 static const uint8_t engine_volume[4]={4,4,7,5};
-/* VIA sample clock, about 1000..3000 Hz. Runtime scales for PHI2. */
-/* Slow period and the span towards the fast period, interpolated in engine.asm. */
-uint16_t engine_period[2];
-uint16_t engine_latch;
-uint8_t engine_active,engine_level;
 static const uint8_t opl_slot[9]={0,1,2,8,9,10,16,17,18};
 uint8_t opl_a[9],opl_b[9],opl_volume[9];
-/* PSG 0: native effect, 1: missile, 2: bridge noise, 3: blast body,
- * 4..7: engine. OPL 0..3: engine, 4..6: blast, 7: missile, 8: fuel tone. */
+/* OPL 0..3: engine, 4..6: blast, 7: missile, 8: fuel tone. */
+#if RIVER_PCM
 void pcm_feed(void);
 void pcm_reset(void);
+#endif
 void opl_commit(void);
-void psg_engine_init(void);
-void psg_engine_apply(void);
-void psg_engine_stop(void);
+void music_effects(void);
 
 #pragma optimize (push, on)
 #pragma code-name(push, "STARTUP_AUDIO")
@@ -51,15 +48,29 @@ void psg_engine_stop(void);
 /* Replaced by the game-over player after argument parsing and startup fade. */
 uint8_t audio_options(int argc,char** argv)
 {
-    static const char* const options[]={"/auto","/psg","/opl2","/pcm","/v","/help","/?"};
+    static const char* const options[]={"/auto","/opl2",
+#if RIVER_PCM
+        "/pcm",
+#endif
+        "/v","/help","/?"};
+    #define BACKEND_OPTIONS (2+RIVER_PCM)
+    #define OPTION_COUNT (sizeof(options)/sizeof(options[0]))
     uint8_t i,n;
     for (i=1;i<argc;++i) {
-        for (n=0;n<7;++n) if (!stricmp(argv[i],options[n])) break;
-        if (n<4) requested=n;
-        else if (n==4) sound_verbose=1;
+        for (n=0;n<OPTION_COUNT;++n) if (!stricmp(argv[i],options[n])) break;
+        if (n<BACKEND_OPTIONS) {
+#if RIVER_PCM
+            requested=n ? n+1 : AUDIO_AUTO;
+#endif
+        }
+        else if (n==BACKEND_OPTIONS) sound_verbose=1;
         else {
-            puts("Usage: load riverraid.rp6502 [/auto | /psg | /opl2 | /pcm] [/v]");
-            return n<7 ? 1 : 2;
+#if RIVER_PCM
+            puts("Usage: load riverraid.rp6502 [/auto | /opl2 | /pcm] [/v]");
+#else
+            puts("Usage: load riverraid.rp6502 [/auto | /opl2] [/v]");
+#endif
+            return n<OPTION_COUNT ? 1 : 2;
         }
     }
     return 0;
@@ -116,6 +127,7 @@ static void opl_instruments(void)
         opl_write(0xc0+n,connection[n]);
     }
 }
+#if RIVER_PCM
 static uint8_t try_pcm(void)
 {
     static const uint8_t config[8]={0,2,3,11,0x40,0x1f,0,0};
@@ -126,9 +138,11 @@ static uint8_t try_pcm(void)
     if (pcm_enabled) audio_backend=AUDIO_PCM;
     return pcm_enabled;
 }
+#endif
 uint8_t audio_init(void)
 {
     /* Cover pixels have finished using the shared PCM/OPL XRAM range. */
+#if RIVER_PCM
     if (requested==AUDIO_AUTO || requested==AUDIO_PCM) {
         if (try_pcm()) return 1;
         if (requested==AUDIO_PCM) {
@@ -136,89 +150,15 @@ uint8_t audio_init(void)
             return 0;
         }
     }
-    audio_backend=requested==AUDIO_PSG ? AUDIO_PSG : AUDIO_OPL2;
-    /* A supported PCM stream must not remain mixed with an explicit PSG/OPL. */
-    if (requested==AUDIO_OPL2 || requested==AUDIO_PSG) xreg(0,1,2,0xffff);
-    if (audio_backend==AUDIO_OPL2) {
-        /* PCM shares this range; never enable OPL with stale sample bytes. */
-        xram0_set(XRAM_OPL,0,256);
-        if (xreg(0,1,1,XRAM_OPL)<0) return 0;
-        opl_write(1,32); /* waveform selection */
-        opl_instruments();
-        return 1;
-    }
-    {
-        uint8_t n;
-        uint16_t clock=(uint16_t)ria_attr_get(RIA_ATTR_PHI2_KHZ);
-        memset(psg,0,sizeof(psg));
-        engine_period[0]=clock-2;
-        engine_period[1]=clock-clock/3;
-        /* Opposite stationary waves act as signed level outputs. A timer
-         * clocks polynomial noise into their volume registers; no PCM API. */
-        for (n=4;n<8;++n) {
-            psg[n].duty=255; psg[n].release_wave=(n&1) ? 0x30 : 0x10;
-            /* Fixed attack ceiling: the IRQ changes only sustain (decay).
-             * All engine levels are <= gain 7, including full throttle. */
-            psg[n].attack=0x70; psg[n].decay=0xf0;
-        }
-        xram0_write(XRAM_PSG,psg,sizeof(psg));
-        if (xreg(0,1,0,XRAM_PSG)<0) return 0;
-        psg_engine_init(); return 1;
-    }
-}
-static void psg_update(uint8_t flight,uint8_t native_engine)
-{
-    uint8_t n,volume,level,bridge,mix;
-    bridge=!pcm_tone[1] ? pcm_amplitude[1]>>1 : 0;
-    /* Native PSG effect settings stay unchanged. Engine no longer occupies
-     * or replaces an effect/bass slot. */
-    volume=pcm_amplitude[0]>>1;
-    psg[0].freq=(pcm_tone[0] ? tone_hz(pcm_step[0]) : 36+volume*4)*3;
-    psg[0].duty=pcm_tone[0] ? 128 : 240;
-    level=attenuation[volume];
-    if (!pcm_tone[0]) level=level+6>14 ? 14 : level+6;
-    if (native_engine) {
-        /* Engine noise now has its own four level outputs. */
-        volume=0;
-    }
-    psg[0].attack=psg[0].decay=level<<4;
-    psg[0].release_wave=pcm_tone[0] ? 0x10 : 0x40;
-    psg[0].pan_gate=volume!=0;
-
-    psg[1].freq=tone_hz(synth_shot_step)*3;
-    psg[1].duty=128; psg[1].release_wave=0x10;
-    psg[1].attack=psg[1].decay=attenuation[synth_shot_volume]<<4;
-    psg[1].pan_gate=synth_shot_volume!=0;
-
-    psg[2].freq=(36+bridge*4)*3;
-    psg[2].duty=240; psg[2].release_wave=0x40;
-    level=attenuation[bridge]+6; if (level>14) level=14;
-    psg[2].attack=psg[2].decay=level<<4; psg[2].pan_gate=bridge!=0;
-
-    psg[3].pan_gate=0; psg[3].duty=255; psg[3].release_wave=0x30;
-    if (!native_engine && !pcm_tone[0] && volume) {
-        psg[3].freq=(40+volume*3)*3;
-        psg[3].attack=psg[3].decay=attenuation[volume]<<4;
-        psg[3].pan_gate=1;
-    } else if (bridge) {
-        psg[3].freq=(36+bridge*4)*3;
-        psg[3].attack=psg[3].decay=(attenuation[bridge]+2)<<4;
-        psg[3].pan_gate=1;
-    }
-    /* Keep the accepted effect patches, but leave mixing headroom when they
-     * overlap. Engine noise keeps a nonzero gain, even with all effects on. */
-    mix=(synth_shot_volume!=0)+(bridge!=0)+(!native_engine && volume!=0);
-    mix=mix>=3 ? 4 : mix==2 ? 2 : 0;
-    if (mix) for (n=0;n<4;++n) {
-        level=(psg[n].attack>>4)+mix;
-        if (level>15) level=15;
-        psg[n].attack=psg[n].decay=level<<4;
-    }
-    engine_level=attenuation[engine_volume[G(0x84)&3]]+5+mix;
-    if (engine_level>14) engine_level=14;
-    engine_active=flight;
-    xram0_write(XRAM_PSG,psg,32);
-    psg_engine_apply();
+    xreg(0,1,2,0xffff);
+#endif
+    audio_backend=AUDIO_OPL2;
+    /* PCM shares this range; never enable OPL with stale sample bytes. */
+    xram0_set(XRAM_OPL,0,256);
+    if (xreg(0,1,1,XRAM_OPL)<0) return 0;
+    opl_write(1,32);
+    opl_instruments();
+    return 1;
 }
 static void opl_voice(uint8_t n,uint16_t hz,uint8_t volume,uint8_t trim)
 {
@@ -266,7 +206,11 @@ void audio_update(uint8_t paused,uint8_t demo)
     if (gameover_update()) return;
     muted=paused || demo || audio_muted;
     shot=G(0xfb);
-    if (muted || G(0xc6) || (audio_backend==AUDIO_PCM && G(0xf8)==1)) shot_age=18;
+    if (muted || G(0xc6)
+#if RIVER_PCM
+        || (audio_backend==AUDIO_PCM && G(0xf8)==1)
+#endif
+    ) shot_age=18;
     else if (shot>shot_previous) shot_age=0;
     shot_previous=shot;
     engine=!G(0xf8) && (G(0x215)&15)==8;
@@ -278,6 +222,7 @@ void audio_update(uint8_t paused,uint8_t demo)
         pcm_tone[n]=!(ctrl==8 || ctrl<4);
         pcm_step[n]=steps[!pcm_tone[n] ? 0 : ctrl==4 ? 1 : 2][divider];
         if (!n && G(0xf8)==1 && !pcm_tone[n]) pcm_step[n]=16384;
+#if RIVER_PCM
         if (audio_backend==AUDIO_PCM && n && shot_age<18) {
             if (!pcm_tone[n] && volume) shot_age=18;
             else {
@@ -285,30 +230,44 @@ void audio_update(uint8_t paused,uint8_t demo)
                 pcm_step[n]=missile_steps[shot_age++];
             }
         }
+#endif
         pcm_amplitude[n]=muted ? 0 : volume*2;
     }
-    if (audio_backend!=AUDIO_PCM && shot_age<18) {
+    if (
+#if RIVER_PCM
+        audio_backend!=AUDIO_PCM &&
+#endif
+        shot_age<18) {
         synth_shot_step=missile_steps[shot_age++]; synth_shot_volume=15;
     }
+#if RIVER_PCM
     if (audio_backend==AUDIO_PCM) pcm_feed();
-    else if (audio_backend==AUDIO_OPL2) opl_update(flight,engine);
-    else psg_update(flight,engine);
+    else
+#endif
+        opl_update(flight,engine);
+    music_effects();
 }
 void audio_stop(void)
 {
     gameover_stop();
+#if RIVER_PCM
     if (audio_backend==AUDIO_PCM) xreg(0,1,2,0xffff);
-    else if (audio_backend==AUDIO_OPL2) xreg(0,1,1,0xffff);
-    else {psg_engine_stop(); xram0_set(XRAM_PSG,0,64); xreg(0,1,0,0xffff);}
+    else
+#endif
+        xreg(0,1,1,0xffff);
+#if RIVER_PCM
     pcm_enabled=0;
+#endif
 }
+#if RIVER_PCM
 uint8_t audio_next(void)
 {
     audio_stop();
-    requested=audio_backend==AUDIO_PSG ? AUDIO_OPL2 : AUDIO_PSG;
+    requested=AUDIO_OPL2;
     if (audio_backend==AUDIO_OPL2 && try_pcm()) {
         requested=AUDIO_PCM; return 1;
     }
     return audio_init();
 }
+#endif
 #pragma optimize (pop)

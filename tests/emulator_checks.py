@@ -236,13 +236,18 @@ def check_bank_detail(config, terrain, tiles, river1, river2):
 def run_audio_checks(case,sym,fixture,resume,start,output):
     from audio_switch_checks import run_audio_switch_checks
     run_audio_switch_checks(case,sym,fixture,resume,start,output)
-    # PCM must be explicitly supported, and PSG must stay silent alongside it.
+    # Isolate procedural effects here; music_checks verifies the live mix.
+    # Suppress only the runtime music update, before it can prime/mix rings.
+    effects_only=[poke(sym['gameover_update'],[0xa9,0,0xaa,0x60])]
+    fixture=effects_only+fixture
+    start=effects_only+start
+    # PCM must be explicitly supported; pausing silences effects.
     _, samples=case("audio-pcm-init-and-pause",fixture+[
         f'peek 0x{sym["pcm_enabled"]:04x} 1',"dump xram:0xc000 8",
-        "dump xram:0x0180 64",f'dump 0x{sym["pcm_amplitude"]:04x} 2'],rom_args=("/pcm",))
-    header,psg,amplitude=samples
+        f'dump 0x{sym["pcm_amplitude"]:04x} 2'],rom_args=("/pcm",))
+    header,amplitude=samples
     assert header[2:6]==bytes((3,11,0x40,0x1f)), "PCM format/rate/ring mismatch"
-    assert not any(psg) and not any(amplitude), "Pause retained audible voices"
+    assert not any(amplitude), "Pause retained audible voices"
 
     audio_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
                 f'dump 0x{sym["pcm_step"]:04x} 4',f'dump 0x{sym["pcm_tone"]:04x} 2']
@@ -324,7 +329,7 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
     import json
     case("audio-option-default-opl2",fixture+[
         f'peek 0x{sym["audio_backend"]:04x} 2',f'peek 0x{sym["pcm_enabled"]:04x} 0'])
-    for option,backend in (("/psg",1),("/opl2",2),("/pcm",3),("/auto",3),("/OPL2",2)):
+    for option,backend in (("/opl2",2),("/pcm",3),("/auto",3),("/OPL2",2)):
         case("audio-option-"+option[1:],fixture+[
             f'peek 0x{sym["audio_backend"]:04x} {backend}',
             f'peek 0x{sym["pcm_enabled"]:04x} {int(backend==3)}'],rom_args=(option,))
@@ -332,14 +337,13 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
         case("audio-options-last-"+options[-1][1:],fixture+[
             f'peek 0x{sym["audio_backend"]:04x} {backend}'],rom_args=options)
     case("audio-invalid-option",["expect-exit 2 120"],gameplay=False,rom_args=("/wrong",))
+    case("audio-removed-psg-option",["expect-exit 2 120"],gameplay=False,rom_args=("/psg",))
     case("audio-help-option",["expect-exit 0 120"],gameplay=False,rom_args=("/help",))
 
-    for mode in ("psg","opl2"):
-        address,count=(0x0180,64) if mode=="psg" else (0xc000,256)
+    for mode in ("opl2",):
+        address,count=(0xc000,256)
         dump=[f'dump xram:0x{address:04x} {count}']
-        meta=[f'dump 0x{sym["engine_latch"]:04x} 2',
-              f'dump 0x{sym["engine_active"]:04x} 2',
-              f'dump 0x{sym["engine_frame"]:04x} 4'] if mode=="psg" else []
+        meta=[]
         snapshot=dump+meta[:1]
         commands=fixture+[poke(0xf8,[0]*4)]+resume+[
             "press down","run 8"]+snapshot+["release down",poke(0xb5,254),"press up","run 4"]+snapshot+[
@@ -347,68 +351,28 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
             "press p","run 3","release p","run 3","press f2","run 4","release f2","run 12",
             f'wait 0x{sym["ready"]:04x} 2 60']+snapshot
         _,buffers=case("audio-"+mode+"-throttle-and-mute",commands,rom_args=("/"+mode,))
-        slow,fast,paused,demo=buffers[::2] if mode=="psg" else buffers
-        if mode=="psg":
-            means=[8000000/(int.from_bytes(s,'little')+2) for s in buffers[1:4:2]]
-            assert 900<means[0]<1400 and means[1]>means[0]*2.7, "PSG noise clock does not follow throttle"
-            assert all(s[n*8:n*8+2]==b'\0\0' and s[n*8+5]==(0x30 if n&1 else 0x10)
-                       and s[n*8+6]&1 for s in (slow,fast) for n in range(4,8))
-            assert all(not (s[n*8+6]&1) for s in (paused,demo) for n in range(8))
-            # Quantization must follow amplitude, not the logarithmic register
-            # index; otherwise quiet noise collapses into isolated impulses.
-            _,tables=case("audio-psg-linear-levels",fixture+[
-                f'dump 0x{sym["engine_noise_levels"]:04x} 48'],rom_args=("/psg",))
-            gains=(256,204,168,142,120,102,86,73,61,50,40,31,22,14,7,0)
-            for row,level in enumerate(range(9,15)):
-                peak=gains[level-2]
-                for i,register in enumerate(tables[0][row*8:row*8+8]):
-                    error=abs(gains[register>>4]*7-peak*(7-i))
-                    assert error==min(abs(g*7-peak*(7-i)) for g in gains), \
-                        "PSG noise levels do not approximate linear amplitudes"
-            commands=fixture+[poke(0xf8,[0]*4)]+resume+["press up"]
-            for speed in range(256):
-                commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),
-                    poke(0xb5,speed),"run 1","dump 0xb5 1"]+snapshot
-            _,states=case("audio-psg-continuous-speed",commands,rom_args=("/psg",))
-            periods={}
-            levels=set()
-            gains=(256,204,168,142,120,102,86,73,61,50,40,31,22,14,7,0)
-            for speed,registers,latch in zip(states[::3],states[1::3],states[2::3]):
-                periods[speed[0]]=int.from_bytes(latch,'little')
-                assert all(registers[n*8+3]==0x70 for n in range(4,8)), \
-                    "Noise IRQ changes the attack envelope"
-                for pair in (4,6):
-                    a,b=(registers[n*8+4]>>4 for n in (pair,pair+1))
-                    assert a==15 or b==15, "Noise pair drives both signs at once"
-                    levels.add(gains[a]-gains[b])
-            ordered=[periods[s] for s in sorted(periods)]
-            assert len(ordered)>=250, "Speed sweep missed the flight range"
-            assert all(a>b for a,b in zip(ordered,ordered[1:])), \
-                "PSG engine ignores small speed changes"
-            assert len(levels)>=8 and min(levels)<0<max(levels), \
-                "PSG engine still uses only binary amplitudes"
-        else:
-            def pitch(s,n=0):
-                return (s[0xa0+n]|((s[0xb0+n]&3)<<8))*49716*(2**((s[0xb0+n]>>2)&7))/(2**20)
-            means=[sum(pitch(s,n) for n in range(4))/4 for s in (slow,fast)]
-            assert 5<means[0]<80 and means[1]>means[0]*1.3, "OPL noise spectrum does not follow speed"
-            assert all(s[0xc0+n]==14 and s[0x20+slot]==0x23 and s[0x40+slot]==1
-                       for s in (slow,fast) for n,slot in enumerate((0,1,2,8)))
-            assert all(s[0x23+slot]==0x21 and s[0xe0+slot]==s[0xe3+slot]==0
-                       for s in (slow,fast) for slot in (0,1,2,8)), \
-                "Engine enables periodic AM/vibrato or changes its sine operators"
-            assert all(s[0xb0+n]&32 for s in (slow,fast) for n in range(4))
-            assert all(not (s[0xb0+n]&32) for s in (paused,demo) for n in range(9))
-            assert all(s[0x43+n]==63 for s in (paused,demo) for n in (0,1,2,8,9,10,16,17,18))
-            commands=fixture+[poke(0xf8,[0]*4)]+resume+["press up"]
-            for speed in (64,68,64):
-                commands += [poke(sym["noise_rng"],[2,0x65]),poke(0xb5,speed),"run 1"]+dump
-            _,buffers=case("audio-opl2-small-speed-change",commands,rom_args=("/opl2",))
-            first,faster,repeated=buffers
-            assert all(pitch(first,n)==pitch(repeated,n) for n in range(4)), "Noise seed replay changed"
-            assert all(pitch(faster,n)>=pitch(first,n) for n in range(4))
-            assert sum(pitch(faster,n) for n in range(4))>sum(pitch(first,n) for n in range(4)), \
-                "Engine ignores speed changes within a 16-step band"
+        slow,fast,paused,demo=buffers
+        def pitch(s,n=0):
+            return (s[0xa0+n]|((s[0xb0+n]&3)<<8))*49716*(2**((s[0xb0+n]>>2)&7))/(2**20)
+        means=[sum(pitch(s,n) for n in range(4))/4 for s in (slow,fast)]
+        assert 5<means[0]<80 and means[1]>means[0]*1.3, "OPL noise spectrum does not follow speed"
+        assert all(s[0xc0+n]==14 and s[0x20+slot]==0x23 and s[0x40+slot]==1
+                   for s in (slow,fast) for n,slot in enumerate((0,1,2,8)))
+        assert all(s[0x23+slot]==0x21 and s[0xe0+slot]==s[0xe3+slot]==0
+                   for s in (slow,fast) for slot in (0,1,2,8)), \
+            "Engine enables periodic AM/vibrato or changes its sine operators"
+        assert all(s[0xb0+n]&32 for s in (slow,fast) for n in range(4))
+        assert all(not (s[0xb0+n]&32) for s in (paused,demo) for n in range(9))
+        assert all(s[0x43+n]==63 for s in (paused,demo) for n in (0,1,2,8,9,10,16,17,18))
+        commands=fixture+[poke(0xf8,[0]*4)]+resume+["press up"]
+        for speed in (64,68,64):
+            commands += [poke(sym["noise_rng"],[2,0x65]),poke(0xb5,speed),"run 1"]+dump
+        _,buffers=case("audio-opl2-small-speed-change",commands,rom_args=("/opl2",))
+        first,faster,repeated=buffers
+        assert all(pitch(first,n)==pitch(repeated,n) for n in range(4)), "Noise seed replay changed"
+        assert all(pitch(faster,n)>=pitch(first,n) for n in range(4))
+        assert sum(pitch(faster,n) for n in range(4))>sum(pitch(first,n) for n in range(4)), \
+            "Engine ignores speed changes within a 16-step band"
 
         for effect,setup,tone in (
             ("blast",[poke(0xf8,[1,31])],False),
@@ -419,37 +383,24 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
             _,buffers=case(f"audio-{mode}-priority-{effect}",fixture+setup+resume+dump,
                            rom_args=("/"+mode,))
             s=buffers[0]; n=int(effect=="bridge")
-            if mode=="psg":
-                slot=2 if n else 0
-                assert s[slot*8+5]==(0x10 if tone else 0x40) and s[slot*8+6]&1
-                assert all(s[v*8+6]&1 for v in range(4,8)), "Effect stopped the flying engine"
-            else:
-                assert s[0xb8 if tone else 0xb4]&32
-                if tone: assert s[0xc8]&1 and s[0x32]==0x23, "Fuel tone lost its odd harmonic"
-                assert not s[0xbd]&0x3f, "Blast incorrectly uses metallic percussion"
-                if not tone:
-                    assert all(s[0xc0+v]==8 and s[0x20+slot]==0x22 and s[0x40+slot]==16
-                               for v,slot in ((4,9),(5,10),(6,16))), "Blast lost its FM noise body"
-                assert all(s[0xb0+v]&32 for v in range(4)), "Effect stopped the flying engine"
+            assert s[0xb8 if tone else 0xb4]&32
+            if tone: assert s[0xc8]&1 and s[0x32]==0x23, "Fuel tone lost its odd harmonic"
+            assert not s[0xbd]&0x3f, "Blast incorrectly uses metallic percussion"
+            if not tone:
+                assert all(s[0xc0+v]==8 and s[0x20+slot]==0x22 and s[0x40+slot]==16
+                           for v,slot in ((4,9),(5,10),(6,16))), "Blast lost its FM noise body"
+            assert all(s[0xb0+v]&32 for v in range(4)), "Effect stopped the flying engine"
 
         _,buffers=case(f"audio-{mode}-engine-missile-blast",fixture+resume+[
             poke(0xfa,[23,15]),"run 2"]+dump,rom_args=("/"+mode,))
         s=buffers[0]
-        if mode=="psg":
-            assert all(s[n*8+6]&1 for n in (1,2,3,4,5,6,7)), "Engine, shot and blast do not overlap"
-            assert s[13]==0x10 and s[21]==0x40
-        else:
-            assert all(s[0xb0+n]&32 for n in range(8)), "OPL engine, shot and blast do not overlap"
-            assert s[0xc7]&1 and s[0x31]==0x23
+        assert all(s[0xb0+n]&32 for n in range(8)), "OPL engine, shot and blast do not overlap"
+        assert s[0xc7]&1 and s[0x31]==0x23
 
         _,buffers=case(f"audio-{mode}-all-voices",fixture+resume+[
             poke(0xf8,[3,8]),poke(0xfa,[23,15]),"run 2"]+dump,rom_args=("/"+mode,))
         s=buffers[0]
-        if mode=="psg":
-            assert all(s[n*8+6]&1 for n in range(8)), "An overlapping PSG voice is stopped"
-            assert all(s[n*8+3]>>4<15 for n in range(4)), "An overlapping PSG effect is silent"
-        else:
-            assert all(s[0xb0+n]&32 for n in range(9)), "An overlapping OPL voice is silent"
+        assert all(s[0xb0+n]&32 for n in range(9)), "An overlapping OPL voice is silent"
 
         engine_statistics={}
         for name,setup,frames in (
@@ -467,43 +418,16 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
                     commands += ["release up","press down"] if frame==60 else ["release down","press up"]
                 commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),"run 1"]+dump+meta
             _,buffers=case(f"audio-{mode}-capture-{name}",commands,rom_args=("/"+mode,))
-            if mode=="psg":
-                previous_ticks,previous_rng=struct.unpack('<HH',buffers[2])
-                captured=buffers[3:]; buffers=captured[::4]; trace=[]
-                for s,latch,control,state in zip(captured[::4],captured[1::4],captured[2::4],captured[3::4]):
-                    ticks,rng=struct.unpack('<HH',state)
-                    delta=(ticks-previous_ticks)&65535
-                    # The first two snapshots straddle the idle-to-flight
-                    # retune and a change in the main-loop publish position.
-                    assert delta<=(75 if len(trace)<2 else 52), "Noise IRQ runs beyond its requested clock"
-                    expected_rng=previous_rng
-                    for tick in range(previous_ticks+1,previous_ticks+delta+1):
-                        for bit in range(4):
-                            expected_rng=(expected_rng>>1)^(0xb400 if expected_rng&1 else 0)
-                    assert rng==expected_rng, "Noise generator does not match the captured IRQ count"
-                    trace.append(dict(label=name,seconds=1/60,psg=list(s),engine_noise=dict(
-                        start_rng=previous_rng,end_rng=rng,ticks=delta,start_ticks=previous_ticks,
-                        clock_hz=8000000/(int.from_bytes(latch,'little')+2),
-                        active=bool(control[0]),level=control[1],bits_per_sample=4,linear_levels=True)))
-                    previous_ticks,previous_rng=ticks,rng
-            else:
-                trace=[dict(label=name,seconds=1/60,opl2=list(s)) for s in buffers]
+            trace=[dict(label=name,seconds=1/60,opl2=list(s)) for s in buffers]
             (output/f"audio-{mode}-{name}.json").write_text(json.dumps(trace),encoding="utf-8")
-            if mode=="psg" and name=="engine-ramp":
-                for begin,end,rising in ((2,60,True),(62,120,False),(122,180,True)):
-                    clocks=[e['engine_noise']['clock_hz'] for e in trace[begin:end]]
-                    assert clocks[0]!=clocks[-1], "Engine clock does not respond to flight controls"
-                    assert all(a<=b if rising else a>=b for a,b in zip(clocks,clocks[1:])), \
-                        "Engine noise pitch moves against the plane's speed"
             if name in ("engine-slow","engine-fast"):
-                engine_statistics[name]=sum(e['engine_noise']['clock_hz'] for e in trace)/len(trace) if mode=="psg" else \
-                    sum(pitch(e['opl2'],n) for e in trace for n in range(4))/(len(trace)*4)
+                engine_statistics[name]=sum(pitch(e['opl2'],n) for e in trace for n in range(4))/(len(trace)*4)
             if name=="missile":
                 pitches=[]
                 for s in buffers:
-                    active=s[14]&1 if mode=="psg" else s[0xb7]&32
+                    active=s[0xb7]&32
                     if active:
-                        pitches.append(struct.unpack_from("<H",s,8)[0]/3 if mode=="psg" else pitch(s,7))
+                        pitches.append(pitch(s,7))
                 assert len(pitches)>=16 and 330<pitches[0]<430 and 170<pitches[-1]<260
                 assert all(a>b for a,b in zip(pitches,pitches[1:])), "Missile does not descend smoothly"
             if mode=="opl2" and name=="explosion":
@@ -517,13 +441,6 @@ def run_synth_checks(case,sym,fixture,resume,start,output):
         case("audio-"+mode+"-frame-budget",start+[
             "press up space","run 1200","release up space","run 2"],rom_args=("/"+mode,))
         case("audio-"+mode+"-exit",start+["press escape","expect-exit 0 480"],rom_args=("/"+mode,))
-        if mode=="psg":
-            state_dump=[f'dump 0x{sym["engine_frame"]:04x} 4']
-            _,states=case("audio-psg-clock-pause",fixture+state_dump+["run 60"]+state_dump+
-                resume+["run 12"]+state_dump+["press p","run 3","release p","run 3"]+
-                state_dump+["run 60"]+state_dump,rom_args=("/psg",))
-            assert states[0]==states[1] and states[3]==states[4], "Noise timer did not stop during pause"
-            assert states[2]!=states[1], "Noise timer did not resume"
 
 
 def main():
@@ -532,6 +449,8 @@ def main():
     parser.add_argument("--emulator", type=Path, default=ROOT / "tools/rp6502-emu.exe")
     parser.add_argument("--audio-only",action="store_true")
     parser.add_argument("--intro-only",action="store_true")
+    parser.add_argument("--music-only",action="store_true")
+    parser.add_argument("--opl-only",action="store_true",help="Check a RIVER_PCM=OFF build")
     parser.add_argument("--gameover-only",action="store_true")
     parser.add_argument("--victory-only",action="store_true")
     parser.add_argument("--audio-switch-only",action="store_true")
@@ -602,6 +521,23 @@ def main():
         poke(0xc0, 24), poke(0xc6, 0), poke(0xb2, 180), poke(0xf5, 81),
         poke(0xe0, 0), poke(sym["river1"], [0]*192), poke(sym["river2"], [0]*192)]
     clear_score = [poke(0xcd + n*2, 88 if n<5 else 0) for n in range(6)]
+
+    pcm_build = 'intro-drums.pcm' in dict(load_image.assets)
+    selected_suite = any(value for name,value in vars(args).items() if name.endswith('_only'))
+    if not pcm_build and any((args.audio_only,args.intro_only,args.music_only,
+            args.gameover_only,args.victory_only,args.audio_switch_only,args.screens_only,args.controls_only)):
+        parser.error('This suite requires --build build/cc65/release-pcm; use --opl-only for the default build')
+    if args.opl_only or (not pcm_build and not selected_suite):
+        from opl_only_checks import run_opl_only_checks
+        run_opl_only_checks(case,sym,boot,fixture,resume,start,build,dict(load_image.assets))
+        print(f"All {count} OPL2-only checks passed.",flush=True)
+        return
+
+    if args.music_only:
+        from music_checks import run_music_checks
+        run_music_checks(case,sym,boot,fixture,resume,build,dict(load_image.assets),load_image)
+        print(f"All {count} music checks passed.",flush=True)
+        return
 
     if args.intro_only:
         from intro_checks import run_intro_checks
@@ -828,7 +764,7 @@ def main():
     assert message==assets["outro-prompt.bin"] and any(message) and not any(message[-14:])
     assert message_palette==struct.pack("<HH",32,0xffff), "Farewell text is not white on black"
     assert buffers[68:]==[outro_palette(i) for i in reversed(range(64))], "Outro fade out differs from its BMP"
-    for backend in ("opl2","psg","pcm"):
+    for backend in ("opl2","pcm"):
         case(f"outro-{backend}-held-escape",start+["press escape","expect-exit 0 480"],
              rom_args=("/"+backend,),gameplay=False)
     case("outro-attract-held-escape",boot+["press escape","expect-exit 0 480"],gameplay=False)
@@ -1938,6 +1874,8 @@ def main():
     run_gameover_checks(case,sym,fixture,resume,boot,build,dict(load_image.assets))
     from victory_checks import run_victory_checks
     run_victory_checks(case,sym,fixture,resume,boot,dict(load_image.assets),load_image)
+    from music_checks import run_music_checks
+    run_music_checks(case,sym,boot,fixture,resume,build,dict(load_image.assets),load_image)
     print(f"All {count} emulator checks passed. Screenshots: {output}", flush=True)
 
 

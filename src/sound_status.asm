@@ -135,4 +135,7 @@ _sound_status_update:
     dex
     bne @backend
     rts
-sound_backends: .byte "    ","PSG ","OPL ","PCM "
+sound_backends: .byte "    ","    ","OPL "
+.if RIVER_PCM
+    .byte "PCM "
+.endif

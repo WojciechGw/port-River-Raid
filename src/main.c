@@ -651,12 +651,14 @@ static void prepare_images(void)
 #pragma optimize(pop)
 /* Keep mountain placement compact alongside the additional bitmap data. */
 #pragma optimize(push, on)
+#pragma code-name(push, "SPLASH")
 static void jet_image(void)
 {
     if (JET_ADDRESS==jet_cache) return;
     jet_cache=JET_ADDRESS;
     write_jet_image(JET_ADDRESS);
 }
+#pragma code-name(pop)
 static int16_t fit_mountain(uint8_t n,int16_t native_x)
 {
     static mountain_position_t* cached;
@@ -1430,13 +1432,17 @@ static void hud_layout(void)
     }
     shown_level=shown_variant=shown_player=shown_reserves=shown_demo=255;
     palette_player=255; high_dirty=1;
+    if (hud_pending<2) for (i=0;i<HUD_SPRITE_COUNT;++i) {
+        /* F1 music reuses this RAM; rebuild descriptors in every game mode. */
+        hud_sprites[i].y=-256;
+        hud_sprites[i].size=0x11; hud_sprites[i].options=0x42;
+    }
     if (VAR==2) {
         if (hud_pending<2) {
         refresh_duo_hud_palettes();
         hud_dirty=7;
         old_score[0]=old_score[1]=255;
         for (i=0;i<HUD_SPRITE_COUNT;++i) {
-            hud_sprites[i].y=-256; hud_sprites[i].size=0x11;
             hud_sprites[i].palette=XRAM_HUD_BLACK_PALETTE;
         }
         hud_label(4,3,"P1",0x88); hud_label(84,3,"P2",0x66);
@@ -1469,9 +1475,7 @@ static void hud_layout(void)
     }
     if (hud_pending<2) {
     for (i=0;i<HUD_SPRITE_COUNT;++i) {
-        hud_sprites[i].y=-256;
         hud_sprites[i].palette=VAR==1 && i>=9 ? XRAM_GAME2_LIFE_PALETTE : XRAM_PALETTE;
-        hud_sprites[i].size=0x11; hud_sprites[i].options=0x42;
         if (i>=3 && i<9) {
             hud_sprites[i].x=(HUD_RECORD_X+(i-3)*8)*2; hud_sprites[i].y=HUD_TOP+HUD_SCORE_Y;
             hud_sprites[i].palette=XRAM_HUD_BLACK_PALETTE;
@@ -1650,15 +1654,18 @@ static uint8_t configure_video(uint8_t restoring)
             uint16_t count=HELP_VIDEO_BYTES-a<sizeof(row) ? HELP_VIDEO_BYTES-a : sizeof(row);
             xram0_read(row,XRAM_HELP_VIDEO+a,count); upload(XRAM_PALETTE+a,row,count);
         }
+        /* Restore inactive descriptors too: the screen player used their RAM. */
+        xram0_read(sprites,XRAM_SPRITES,sizeof(sprites));
         /* F1 may interrupt a HUD layout spread over several frames. */
         upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites));
     } else {
         rebuild_terrain();
         if (!audio_init()) return 0;
         render(); present_frame();
-        game_fade_prepare();
     }
     if (restoring && !audio_init()) return 0;
+    /* Capture the restored colors and blacken them before enabling planes. */
+    game_fade_prepare();
     if (sound_status_init()<0 ||
         xreg(1,0,1,2,0x702,XRAM_TERRAIN_CONFIG,0,RIVER_TOP,RIVER_TOP+RIVER_HEIGHT)<0 ||
         /* Keep the player on the front plane, above all world sprites. */
@@ -1669,7 +1676,7 @@ static uint8_t configure_video(uint8_t restoring)
         xreg(1,0,1,3,2,XRAM_HUD_BITMAP_CONFIG,0,HUD_TOP,HUD_TOP+HUD_HEIGHT)<0 ||
         xreg(1,0,1,3,2,XRAM_DEMO_FOOTER_CONFIG,1,HUD_FOOTER_Y,HUD_FOOTER_Y+8)<0 ||
         xreg(0,0,0,XRAM_KEYBOARD)<0 || xreg(0,0,2,XRAM_GAMEPADS)<0) return 0;
-    if (!restoring) game_fade_in();
+    game_fade_in();
     return 1;
 }
 /* Keep startup and the frame loop compact in the fixed Debug RAM map. */
@@ -1685,7 +1692,6 @@ int main(int argc,char** argv)
      * stationary throughout the startup fade. No joystick is held. */
     G(0x280)=255; G(0x22c)=G(0x22d)=128;
     while (MODE!=255) rr_step();
-    xram0_set(XRAM_PSG,0,64);
     if (!configure_video(0)) return 1;
     gameover_install();
     last_vsync=RIA.vsync;
@@ -1728,11 +1734,15 @@ int main(int argc,char** argv)
             audio_muted^=1;
             if (!audio_muted) sound_status_notify();
         }
+#if RIVER_PCM
         if ((changes&64) && !audio_muted) {
             if (!audio_next()) return 1;
             sound_status_notify();
         }
         if (changes&96) sound_status_update();
+#else
+        if (changes&32) sound_status_update();
+#endif
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
         if ((changes&4) ||

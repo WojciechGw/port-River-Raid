@@ -4,10 +4,11 @@
 ; Prepare at most 160 samples per frame, keeping 512 samples queued including
 ; the unfinished page. This spreads CPU work across VSYNCs without IRQ work.
 .include "rp6502.inc"
-.export _pcm_feed, _pcm_reset, _pcm_refills, _pcm_empty
 .export _opl_commit
-.import _pcm_amplitude, _pcm_step, _pcm_tone
 .import _opl_a, _opl_b, _opl_volume
+.if RIVER_PCM
+.export _pcm_feed, _pcm_reset, _pcm_refills, _pcm_empty
+.import _pcm_amplitude, _pcm_step, _pcm_tone
 
 .segment "ZEROPAGE"
 poly: .res 6
@@ -252,10 +253,12 @@ feed_publish:
     jmp feed_next
 feed_done:
     rts
+.endif
 
 ; Commit the nine prepared OPL voices through one portal setup. Read the
 ; register mirror to avoid redundant writes/key transitions; no C call per
 ; register, no separate 256-byte cache, and no sound work inside an IRQ.
+.segment "CODE"
 _opl_commit:
     lda #0
     sta RIA_STEP0

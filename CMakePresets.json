@@ -16,23 +16,45 @@
         {
             "name": "cc65/Debug",
             "displayName": "cc65/Debug",
-            "description": "cc65, with debug information",
+            "description": "cc65, with debug information, OPL2 only",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/cc65/debug",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Debug",
+                "RIVER_PCM": "OFF",
                 "CC65_TARGET_SYSTEM": "rp6502"
             }
         },
         {
             "name": "cc65/Release",
             "displayName": "cc65/Release",
-            "description": "cc65, optimized",
+            "description": "cc65, optimized, OPL2 only",
             "inherits": "base",
             "binaryDir": "${sourceDir}/build/cc65/release",
             "cacheVariables": {
                 "CMAKE_BUILD_TYPE": "Release",
+                "RIVER_PCM": "OFF",
                 "CC65_TARGET_SYSTEM": "rp6502"
+            }
+        },
+        {
+            "name": "cc65/Release-OPL2",
+            "displayName": "cc65/Release (OPL2 only)",
+            "description": "cc65, optimized, without PCM assets or playback",
+            "inherits": "cc65/Release",
+            "binaryDir": "${sourceDir}/build/cc65/release-opl2",
+            "cacheVariables": {
+                "RIVER_PCM": "OFF"
+            }
+        },
+        {
+            "name": "cc65/Release-PCM",
+            "displayName": "cc65/Release (OPL2 + PCM)",
+            "description": "cc65, optimized, with optional PCM music and effects",
+            "inherits": "cc65/Release",
+            "binaryDir": "${sourceDir}/build/cc65/release-pcm",
+            "cacheVariables": {
+                "RIVER_PCM": "ON"
             }
         },
         {
@@ -79,6 +101,18 @@
             "name": "cc65/Release",
             "displayName": "cc65/Release",
             "configurePreset": "cc65/Release",
+            "targets": ["all"]
+        },
+        {
+            "name": "cc65/Release-OPL2",
+            "displayName": "cc65/Release (OPL2 only)",
+            "configurePreset": "cc65/Release-OPL2",
+            "targets": ["all"]
+        },
+        {
+            "name": "cc65/Release-PCM",
+            "displayName": "cc65/Release (OPL2 + PCM)",
+            "configurePreset": "cc65/Release-PCM",
             "targets": ["all"]
         },
         {

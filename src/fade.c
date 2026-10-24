@@ -1,11 +1,12 @@
 #include <rp6502.h>
 #include "xram.h"
 
-/* Startup only: preserve every palette, including transparent entries, above
- * the audio ring. Prepare colors offscreen; publish them together at VSYNC. */
+/* Startup and F1 return: preserve every palette, including transparent entries,
+ * above the audio ring. Keep this code/state outside the startup music overlay.
+ * Prepare colors offscreen; publish them together at VSYNC. */
 #pragma optimize(push, on)
-#pragma code-name("STARTUP_AUDIO")
-#pragma bss-name("STARTUP_AUDIO")
+#pragma code-name("CODE")
+#pragma bss-name("BSS")
 void game_fade_capture(void);
 void game_fade_publish(void);
 uint16_t game_fade_read(void);

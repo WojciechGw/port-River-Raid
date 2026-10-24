@@ -307,6 +307,12 @@ _refresh_jet_palette:
     lda $80
     cmp #2
     beq @native
+    lda $86                 ; Mono masks the hue nibble ($0F or $07).
+    bmi @cyan
+    lda #$0c
+    jsr _tia_color
+    bra @jet
+@cyan:
     lda #$e0                 ; RGB(0,31,31), same cyan as the classic P2 jet.
     ldx #$ff
     bra @jet

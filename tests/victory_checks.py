@@ -43,7 +43,7 @@ def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
 
     for number in (4,6,19,21,49):
         case(f'victory-no-bonus-bridge-{number}',base+bridge(number,True)+resume+[
-            'peek 0xc0 24',active+' 0',started+' 0'])
+            'peek 0xc0 24',active+' 1',kind+' 2',started+' 0'])
     case('victory-muted-still-awards',base+bridge(5)+[poke(sym['audio_muted'],1)]+
         resume+['peek 0xc0 32',active+' 0',started+' 0'])
     case('victory-classic-life-cap',base+bridge(20)+[poke(0xc0,72)]+resume+[
@@ -64,12 +64,12 @@ def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
     assert score['bpm']==96 and score['samples']==len(pcm)==186368
     # Two display frames per page make this clock test longer than real audio;
     # fill the tank so the flight survives the entire verification timeline.
-    commands = base+bridge(5)+[poke(0xb7,[255,255])]+resume+['dump xram:0xc008 768']
+    commands = base+bridge(5)+[poke(0xb7,[255,255])]+resume+['dump xram:0xca08 768']
     for page in range(1,len(pcm)//256):
-        commands += [f'poke xram:0xc006 0 {page%4}','run 2','dump xram:0xc900 256']
+        commands += [f'poke xram:0xca06 0 {page%4}','run 2','dump xram:0xc900 256']
         if page+2<len(pcm)//256:
-            commands += [f'dump xram:0x{0xc008+((page+2)%4)*256:04x} 256']
-    commands += [f'poke xram:0xc006 0 {(len(pcm)//256)%4}','run 2',active+' 0',
+            commands += [f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
+    commands += [f'poke xram:0xca06 0 {(len(pcm)//256)%4}','run 3',active+' 1',kind+' 2',
                  started+' 1','peek 0xc0 32']
     _,data = case('victory-complete-score-and-pcm',commands)
     assert data.pop(0)==pcm[:768]

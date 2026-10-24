@@ -1,5 +1,14 @@
 # Testy portu
 
+Domyślny wariant bez PCM: `cmake --preset cc65/Release`, następnie
+`cmake --build --preset cc65/Release` i `python tests/emulator_checks.py`.
+Bez wybrania zestawu skrypt wykrywa paczkę OPL2 i uruchamia testy `--opl-only`.
+Testy sprawdzają brak zasobów i kodu PCM, planszę `manualOPL.bmp`, odrzucenie
+`/pcm`, brak reakcji na F10, wyciszanie F9 w GAME 1–3, perkusję OPL2,
+równoczesną muzykę i efekty, obie fanfary oraz wygaszanie muzyki na planszach.
+Emulator obsługuje PCM: test nie wymusza niedostępności firmware, dzięki czemu
+sprawdza rzeczywiste wyłączenie PCM podczas kompilacji.
+
 `classic-selection-life-icons-game1/2` sprawdzają po trzy ikony żyć na ekranie
 wyboru po pierwszym uruchomieniu i powrocie z F1, a następnie rzeczywiste
 wartości 3, 1 i 0 podczas rozgrywki.
@@ -8,7 +17,21 @@ wartości 3, 1 i 0 podczas rozgrywki.
 wskaźniki paliwa dla obu graczy po wybraniu GAME 3, powrocie z F1 i ponownym
 wyborze trybu. Sprawdza też ukrycie ikon DUO po przejściu do GAME 1.
 
-Po zbudowaniu Release: `python tests/emulator_checks.py`.
+Pełny wariant: `cmake --preset cc65/Release-PCM`, następnie
+`cmake --build --preset cc65/Release-PCM`.
+Poniższe zestawy obejmujące PCM wymagają dodania
+`--build build/cc65/release-pcm` do polecenia testów.
+`python tests/emulator_checks.py --build build/cc65/release-pcm --music-only`
+sprawdza pełną oprawę muzyczną:
+wybór hybrydy OPL+PCM, odpowiedź `-1` firmware na próbę uruchomienia PCM,
+melodię i perkusję OPL bez PCM, nową aranżację podczas lotu oraz efekty
+na każdym backendzie. Testy porównują także dodatnie i ujemne próbki mieszane
+przez CPU, dwukrotne powtarzanie próbek efektów 8 kHz w strumieniu 16 kHz
+i zawijanie obu buforów. Sprawdzają F1, F9, wyciszanie wyjścia oraz oba jingle.
+Kopia oryginalnych tabel `$CB00..$CFFF` jest porównywana bajt po bajcie.
+Podgląd nowej aranżacji można wygenerować przez `tools/preview_intro.py`,
+podając `flight-score.bin`, `--source flight-score.json` i
+`--drums flight-drums.pcm` z katalogu buildu oraz bibliotekę OPL.
 `python tests/emulator_checks.py --cpb --missiles-only` sprawdza przesunięte
 miejsce wystrzału i zgodność koloru pocisku z samolotem w GAME 1, GAME 2
 i DUO, dla obu graczy, pocisków kierowanych/prostych i trybu czarno-białego.
@@ -59,11 +82,14 @@ Import: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --
 Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test porównuje
 rejestry OPL2 i każdą stronę perkusji PCM przez pełny utwór i początek następnej
 pętli. Symuluje odbiór 16000 próbek/s, sprawdzając synchronizację i zapas bufora.
-Sprawdza wyłączenie muzyki po okładce, ciszę w instrukcji,
-uruchomienie rozgrywki z każdym backendem i zachowanie obrazu po F1.
+Sprawdza muzykę w instrukcji, pełną pętlę alternatywnej aranżacji w demo,
+jednoczesną muzykę i efekty przy rozpoczęciu rozgrywki z każdym backendem,
+wyciszanie F9 i zachowanie obrazu po F1.
+Test wyjścia porównuje tłumienie kanałów OPL2 i opublikowane próbki PCM podczas
+końcowego fade out, aż do ciszy.
 Wspólne funkcje ekranów zajmują 512 bajtów `reset_tiles`; odtwarzacz używa
-dodatkowo 1024 bajtów od `sprites`, tylko przed pierwszym uruchomieniem gry.
-Dane nut są w XRAM `$F100`, rejestry OPL2 w `$0100`, a nagłówek i bufor PCM
+dodatkowo 1024 bajtów od `sprites`, odbudowywanych także po F1.
+Dane nut są w XRAM `$F900`, rejestry OPL2 w `$0100`, a nagłówek i bufor PCM
 w `$09F8..$0DFF`. Perkusja pochodzi z zasobu ROM `intro-drums.pcm`.
 Ładowanie instrukcji przez F1
 nie może nadpisać kopii obrazu gry w `$F100..$F8FF`.
@@ -98,21 +124,21 @@ zawijanie bufora oraz publikowanie tylko kompletnych stron.
 6502: wolny/szybki silnik, wybuch i pocisk. To surowe PCM 8 kHz, bez
 interpolacji miksera i toru audio fizycznego komputera.
 Opcja `--audio-only` uruchamia wyłącznie scenariusze dźwięku.
-Testy `f10-*` obejmują cykl PSG/OPL2/PCM, przytrzymanie klawisza,
+Testy `f10-*` obejmują cykl OPL2/PCM, przytrzymanie klawisza,
 pauzę, blokadę podczas wyciszenia F9, powrót z F1 oraz przełączanie podczas
-lotu solo i DUO. Sprawdzają napis PSG/OPL/PCM pod scrollerem przez 1 sekundę,
+lotu solo i DUO. Sprawdzają napis OPL/PCM pod scrollerem przez 1 sekundę,
 odnowienie czasu kolejnym F10 i brak odnawiania przy przytrzymaniu klawisza.
 Testy `f9-unmute-notice-*` sprawdzają usunięcie ikony wyciszenia i sekundowy
 napis po włączeniu dźwięku, także przy przytrzymaniu F9, dla każdego generatora.
 Ponieważ emulator obsługuje PCM, brak tego interfejsu jest sprawdzany przez
 symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
 Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.
-Pełny zestaw wymaga PCM, natomiast scenariusze `audio-psg-*` i `audio-opl2-*`
+Pełny zestaw wymaga PCM, natomiast scenariusze `audio-opl2-*`
 wybierają backend przez rzeczywiste argumenty programu. Sprawdzają wzrost
 częstotliwości sterujących silnikiem przy przyspieszaniu, niezależność efektów,
-wyciszenie pauzy/demo, wyjście i 1200 klatek gry przy 8 MHz dla obu syntezatorów.
+wyciszenie efektów pauzy/demo, wyjście i 1200 klatek gry przy 8 MHz dla OPL2.
 Sprawdzają także jednoczesne działanie silnika, pocisku, wybuchu i tankowania
-na wszystkich ośmiu oscylatorach PSG / dziewięciu kanałach OPL2 oraz płynne
+na dziewięciu kanałach OPL2 oraz płynne
 obniżanie częstotliwości pocisku przez cały czas jego dźwięku.
 W OPL2 sprawdzają również szumowy instrument wybuchu, jego pełny czas zaniku
 oraz opadanie pasma i głośności podczas eksplozji.
@@ -120,42 +146,29 @@ oraz opadanie pasma i głośności podczas eksplozji.
 dwóch bliskich prędkościach, aby wykryć skokowe sterowanie zegarami FM silnika.
 Szerokopasmowy szum OPL2 wykorzystuje maksymalne sprzężenie zwrotne i TL=1
 modulatora; jego reakcja na gaz polega głównie na zmianie głośności.
-`audio-psg-continuous-speed` sprawdza reakcję PSG na pojedyncze kroki prędkości
-w całym zakresie, stały poziom attack oraz wielopoziomowy, symetryczny sygnał
-szumu silnika. Ślady PSG kontrolują również zgodność stanu generatora
-z liczbą wykonanych przerwań.
 `audio-*-capture-engine-ramp` używa rzeczywistych klawiszy przyspieszania,
-zwalniania i ponownego przyspieszania. `audio-psg-clock-pause` sprawdza, że
-licznik próbek szumu zatrzymuje się podczas pauzy i rusza po jej wyłączeniu.
-Scenariusze opcji obejmują domyślny OPL2, wybór `/psg`, `/opl2`, `/pcm`, `/auto`,
-pierwszeństwo ostatniej opcji, wielkie litery, pomoc i odrzucenie nieznanego
-parametru. Testy PCM przekazują jawnie `/pcm`.
-Pliki `audio-psg-*.json` i `audio-opl2-*.json` zawierają rejestry odczytane
+zwalniania i ponownego przyspieszania.
+Scenariusze opcji obejmują domyślny OPL2, wybór `/opl2`, `/pcm`, `/auto`,
+pierwszeństwo ostatniej opcji, wielkie litery, pomoc i odrzucenie usuniętego
+`/psg` oraz nieznanego parametru. Testy PCM przekazują jawnie `/pcm`.
+Pliki `audio-opl2-*.json` zawierają rejestry odczytane
 z uruchomionego programu w kolejnych klatkach. `tools/preview_synth.py`
 tworzy z nich odsłuchy oraz pomiary FFT i energii detali Haara. OPL2 wymaga
 dodatkowo biblioteki z `tools/opl_preview.c` i źródła emu8950 z firmware
 (`--opl-library`); nie jest ona potrzebna do testów ROM-u ani do kompilacji gry.
 Te odsłuchy są modelami syntezatorów, a nie nagraniami fizycznego toru audio.
-Ślad PSG zawiera również spójny stan generatora szumu i licznik wykonanych
-przerwań VIA. Model odtwarza rzeczywistą sekwencję wielopoziomowego szumu
-(cztery kroki LFSR na próbkę, liniowa kwantyzacja amplitudy), rozkładając
-przerwania równomiernie wewnątrz klatki; nie odtwarza czasu każdego zapisu na
-magistrali ani synchronizacji wątku audio emulatora. Starsze ślady zachowują
-odpowiedni model wcześniejszej kwantyzacji lub z próbkami binarnymi.
-Po wygenerowaniu wszystkich dwunastu próbek `tools/compare_synth.py --previews
-build/audio-v2` sprawdza pasmo silnika PSG, jego zmianę wraz z gazem oraz brak
-nadmiaru wysokich częstotliwości. Dla szerokopasmowego szumu OPL2 sprawdza
+Po wygenerowaniu sześciu próbek OPL2 `tools/compare_synth.py --previews
+build/audio-v2` sprawdza pasmo silnika. Dla szerokopasmowego szumu OPL2 sprawdza
 silniejsze limity składowych tonalnych w długim i krótkim oknie FFT oraz
 wahania obwiedni RMS w oknach 50 ms, wykrywające dudnienie i pulsowanie.
-Sprawdza też reakcję głośności OPL2 na gaz i brak przesterowania obu
-syntezatorów przy nakładaniu efektów.
+Sprawdza też reakcję głośności OPL2 na gaz i brak przesterowania
+przy nakładaniu efektów.
 Opcjonalne `--reference ścieżka/do/RiverRaid.wav` dodaje odsłuch
-porównawczy: oryginał XL/XE, model PSG, model OPL2, z wyrównanym poziomem RMS.
+porównawczy: oryginał XL/XE i model OPL2, z wyrównanym poziomem RMS.
 Próbki nagrania oryginalnego pozostają poza ROM-em i plikami śledzonymi przez Git.
 `audio-engine-response` zapisuje ustawienia odczytane z ROM-u do
-`audio-engine.json`. `python tools/preview_audio.py build/cc65/release/checks/audio-engine.json`
-tworzy próbki WAV przed/po zmianie oraz pomiary modeli PSG/PCM; nie są to
-nagrania z urządzenia audio emulatora ani z fizycznego Picocomputera.
+`audio-engine.json`. Testy efektów izolują syntezator; zestaw `--music-only`
+sprawdza wspólne odtwarzanie muzyki i efektów.
 `cover-prompt-blink` sprawdza pozycję, mały biały napis, zmianę widoczności
 co 30 klatek, niezmienność palety okładki oraz ukrycie tekstu podczas fade.
 `cover-prompt-on.png` i `cover-prompt-off.png` pokazują obie fazy.

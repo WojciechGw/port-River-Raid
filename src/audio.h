@@ -2,11 +2,14 @@
 #define RIVER_AUDIO_H
 #include <stdint.h>
 
-enum { AUDIO_AUTO, AUDIO_PSG, AUDIO_OPL2, AUDIO_PCM };
+/* Keep the OPL/PCM status IDs stable; slot 1 is unused. */
+enum { AUDIO_AUTO=0, AUDIO_OPL2=2, AUDIO_PCM=3 };
 extern uint8_t audio_muted;
 uint8_t audio_options(int argc,char** argv);
 uint8_t audio_init(void);
+#if RIVER_PCM
 uint8_t audio_next(void);
+#endif
 void audio_update(uint8_t paused, uint8_t demo);
 void audio_stop(void);
 void gameover_install(void);
