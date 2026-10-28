@@ -466,7 +466,7 @@ def main():
     parser.add_argument("--start-controls-only", action="store_true", help="Check starting without firing")
     parser.add_argument("--splash-audio-only", action="store_true", help="Check the departing splash engine")
     parser.add_argument("--splash-scenes-only", action="store_true", help="Check scene swaps and final-life graphics")
-    parser.add_argument("--cpb", action="store_true", help="Emulate PICO-SRAM-BANKED registers")
+    parser.add_argument("--cpb", action="store_true", help="Emulate mtRAM registers")
     args = parser.parse_args()
     build = args.build.resolve()
     sym = symbols(build / "riverraid.dbg")

@@ -81,7 +81,7 @@ podając `flight-score.bin`, `--source flight-score.json` i
 `python tests/emulator_checks.py --cpb --missiles-only` sprawdza przesunięte
 miejsce wystrzału i zgodność koloru pocisku z samolotem w GAME 1, GAME 2
 i DUO, dla obu graczy, pocisków kierowanych/prostych i trybu czarno-białego.
-Opcja `--cpb` uruchamia te same scenariusze z modułem PICO-SRAM-BANKED.
+Opcja `--cpb` uruchamia te same scenariusze z modułem mtRAM.
 Każdy zestaw sprawdza CRC bloków ROM-u i wyklucza dane w obszarze
 `$FE00-$FFF9` (cała strona CPB i I/O). Emulator ładuje RAM bez sprzętowej
 sekwencji zapis/reset/weryfikacja, dlatego sama próba uruchomienia w nim gry

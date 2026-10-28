@@ -346,7 +346,7 @@ The cover helpers and tank extension code/state share free CPU memory from
 $D000 through $FDFF, after the original ROM and before CPB's reserved page,
 with scene tables in RODATA and small writable state in DATA below the
 reference ROM. The linker reserves the entire $FE00-$FEFF page for
-PICO-SRAM-BANKED (CPB):
+mtRAM:
 the module rewrites its reset counter at $FED5 whenever the loader resets
 the CPU between writing and verifying RAM. Loading code there causes
 `?Verify failed at $FED5`; $FED6/$FED7 also hold periodically updated
