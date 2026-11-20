@@ -41,6 +41,10 @@ uint8_t opl_a[9],opl_b[9],opl_volume[9];
 #if RIVER_PCM
 void pcm_feed(void);
 void pcm_reset(void);
+/* The firmware's PCM: device, shared with music (music.asm). */
+uint8_t __fastcall__ pcm_dev_start(uint8_t owner);
+void pcm_dev_flush(void);
+#define PCM_OWNER_EFFECTS 1
 #endif
 void opl_commit(void);
 void music_effects(void);
@@ -139,11 +143,10 @@ static void opl_instruments(void)
 #if RIVER_PCM
 static uint8_t try_pcm(void)
 {
-    static const uint8_t config[8]={0,2,3,11,0x40,0x1f,0,0};
+    /* Silent ring and a zero read pointer; the device starts empty. */
     pcm_reset();
     xram0_set(XRAM_PCM,0,8+2048);
-    xram0_write(XRAM_PCM,config,8);
-    pcm_enabled=xreg(0,1,2,XRAM_PCM)>=0;
+    pcm_enabled=pcm_dev_start(PCM_OWNER_EFFECTS);
     if (pcm_enabled) audio_backend=AUDIO_PCM;
     return pcm_enabled;
 }
@@ -155,11 +158,11 @@ uint8_t audio_init(void)
     if (requested==AUDIO_AUTO || requested==AUDIO_PCM) {
         if (try_pcm()) return 1;
         if (requested==AUDIO_PCM) {
-            puts("PCM requires firmware with XREG(0,1,2).");
+            puts("PCM requires RIA firmware 0.43+ (PCM: device).");
             return 0;
         }
     }
-    xreg(0,1,2,0xffff);
+    pcm_dev_flush();
 #endif
     audio_backend=AUDIO_OPL2;
     /* PCM shares this range; never enable OPL with stale sample bytes. */
@@ -298,7 +301,7 @@ void audio_stop(void)
     enemy_age=18;
     gameover_stop();
 #if RIVER_PCM
-    if (audio_backend==AUDIO_PCM) xreg(0,1,2,0xffff);
+    if (audio_backend==AUDIO_PCM) pcm_dev_flush();
     else
 #endif
         xreg(0,1,1,0xffff);

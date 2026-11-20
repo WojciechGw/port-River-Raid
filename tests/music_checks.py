@@ -3,12 +3,23 @@ from emulator_checks import poke
 
 
 def gameplay_drums(data):
+    # Unsigned 8-bit PCM: scale around the 128 midpoint.
     result=[]
     for value in data:
-        signed=value if value<128 else value-256
+        signed=value-128
         magnitude=(abs(signed)*289+200)//400
-        result.append((magnitude if signed>=0 else -magnitude)&255)
+        result.append(128+(magnitude if signed>=0 else -magnitude))
     return bytes(result)
+
+
+def queued_page(written,ring,drums):
+    """The last page queued to the PCM: device since the music start's flush:
+    its staging copy and its source page in the looping drum asset."""
+    index=int.from_bytes(written,'little')//256-1
+    assert index>=0, 'No music page was queued'
+    pages=len(drums)//256
+    source=drums[(index%pages)*256:(index%pages+1)*256]
+    return index,ring[(index%4)*256:(index%4+1)*256],source
 
 
 def check_opl_crash(case,sym,fixture,resume,name,channel=6):
@@ -93,51 +104,58 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
             poke(0xbd,50),poke(0x90,128)]+resume+[
                 synth+f' {mode}',active+' 1',kind+' 1','peek 0xc0 32'],rom_args=('/'+backend,))
 
+    written=f'dump 0x{sym["pcm_written"]:04x} 3'
     for backend in ('opl2','pcm'):
+        # The PCM: device consumes in real time, also under --mute.
         commands=fixture+resume+[synth+' 0',active+' 1',kind+' 2',
+            f'peek 0x{sym["pcm_owner"]:04x} 2',
             'dump xram:0xc900 256','dump xram:0x0180 64',
-            f'dump 0x{sym["pcm_amplitude"]:04x} 2']
-        for frame in range(1,181):
-            read=(frame*16000//60)%1024
-            commands += [f'poke xram:0xca06 {read&255} {read>>8}','run 1']
-        commands += [active+' 1',kind+' 2','dump xram:0xc900 256','dump xram:0xca08 1024',
-                     'dump xram:0xca00 2','dump xram:0xc006 2']
+            f'dump 0x{sym["pcm_amplitude"]:04x} 2',written,'run 180',
+            active+' 1',kind+' 2','dump xram:0xc900 256','dump xram:0xca08 1024',
+            'dump xram:0xc006 2',written,f'dump 0x{sym["pcm_consumed"]:04x} 3']
         _,dumps=case(f'music-flight-effects-{backend}',commands,rom_args=('/'+backend,))
         assert any(dumps[2]), 'Procedural effects were suppressed by music'
-        assert dumps[0][:0xb3]!=dumps[3][:0xb3], 'Flight melody stopped'
-        if backend=='opl2': assert dumps[3][0xb3]&32, 'OPL engine missing'
+        assert dumps[0][:0xb3]!=dumps[4][:0xb3], 'Flight melody stopped'
+        if backend=='opl2': assert dumps[4][0xb3]&32, 'OPL engine missing'
         if backend=='pcm': assert any(dumps[6]), 'PCM effects consumer never advanced'
-        consumed=180*16000//60
-        queued=(int.from_bytes(dumps[5],'little')-consumed)%1024
-        assert 256<queued<=768, 'Flight percussion buffer underrun'
+        before,after,consumed=(int.from_bytes(d,'little') for d in (dumps[3],dumps[7],dumps[8]))
+        expected=180*16000//60
+        assert expected-768<=(after-before)&0xffff<=expected+768, 'Flight percussion did not keep pace'
+        queued=(after-consumed)&0xffff
+        assert 0<queued<=1024, 'Flight percussion buffer underrun'
 
-    # OPL effects leave the percussion stream isolated. Compare real published
+    # OPL effects leave the percussion stream isolated. Compare real queued
     # pages in demo/gameplay, including both signs and repeated ring wraps.
     drums=assets['flight-drums.pcm']
     for scene,setup in (('demo',boot),('gameplay',fixture+resume)):
         commands=setup+[synth+' 0',active+' 1',kind+' 2']
-        for page in range(1,21):
-            commands += [f'poke xram:0xca06 0 {page%4}','run 2',
-                f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
+        for _ in range(20):
+            commands += ['run 2',written,'dump xram:0xca08 1024']
         _,dumps=case(f'music-percussion-gain-{scene}',commands,rom_args=('/opl2',))
-        for page,chunk in enumerate(dumps,1):
-            source=drums[(page+2)*256:(page+3)*256]
+        seen=set()
+        for count,ring in zip(dumps[::2],dumps[1::2]):
+            index,chunk,source=queued_page(count,ring,drums)
+            seen.add(index)
             expected=gameplay_drums(source) if scene=='gameplay' else source
-            assert chunk==expected, f'{scene} percussion page {page}'
+            assert chunk==expected, f'{scene} percussion page {index}'
+        assert len(seen)>=15, f'{scene} percussion stopped advancing'
 
     # Known signed effects samples isolate the actual on-CPU mix/upsampling
     # from the procedural synthesizer. Cross both ring wrap boundaries.
-    drums=assets['flight-drums.pcm']
     for sample in (24,-24):
         commands=fixture+resume+[poke(sym['pcm_feed'],0x60)]
         commands += [poke(0xc008+offset,[sample&255]*128).replace('poke ','poke xram:',1)
                      for offset in range(0,2048,128)]
-        for page in range(1,21):
-            commands += [f'poke xram:0xca06 0 {page%4}','run 2',
-                f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256','dump xram:0xc006 2']
+        for _ in range(40):
+            commands += ['run 2',written,'dump xram:0xca08 1024','dump xram:0xc006 2']
         _,dumps=case(f'music-pcm-signed-mix-{sample}',commands,rom_args=('/pcm',))
-        for page in range(1,21):
-            chunk,read=dumps[(page-1)*2:page*2]
-            source=drums[(page+2)*256:(page+3)*256]
-            assert chunk==bytes((value+sample//2)&255 for value in gameplay_drums(source)), f'PCM mix page {page}'
-            assert int.from_bytes(read,'little')==(384+page*128)%2048
+        previous=None
+        for count,ring,read in zip(dumps[::3],dumps[1::3],dumps[2::3]):
+            index,chunk,source=queued_page(count,ring,drums)
+            assert chunk==bytes((value+sample//2)&255 for value in gameplay_drums(source)), f'PCM mix page {index}'
+            read=int.from_bytes(read,'little')
+            if previous is not None:
+                # Each 256-sample music page consumes 128 effects samples.
+                assert read==(previous[1]+(index-previous[0])*128)%2048, 'Effects read pointer drifted'
+            previous=(index,read)
+        assert previous[1]!=int.from_bytes(dumps[2],'little'), 'Effects read pointer never advanced'

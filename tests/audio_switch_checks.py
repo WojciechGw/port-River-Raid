@@ -85,13 +85,16 @@ def run_audio_switch_checks(case,sym,fixture,resume,start,output):
 
     # This emulator always supports PCM. Simulate the capability probe's
     # negative return, without changing production code or CLI options.
+    # The intro already opened the PCM: device; forget that descriptor so the
+    # next start probes again, as firmware without the device would answer.
     commands=fixture+[poke(sym['try_pcm'],[0xa9,0,0xa2,0,0x60]),
-                      poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60])]
+                      poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60]),
+                      poke(sym['pcm_fd'],0xff)]
     for current in (2,2,2,2,2):
         commands+=tap+[backend+f' {current}',enabled+' 0']
     commands+=opening+closing+[backend+' 2']+resume+['run 4',amplitudes,
         f'peek 0x{sym["music_synth"]:04x} 1',
-        'expect-not "PCM requires firmware"']
+        'expect-not "PCM requires"']
     for current,music_synth in ((2,1),(2,1)):
         commands+=tap+['run 4',backend+f' {current}',
             f'peek 0x{sym["music_synth"]:04x} {music_synth}',

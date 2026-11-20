@@ -1,5 +1,16 @@
 # Testy portu
 
+Testy wymagają emulatora RP6502-EMU z firmware RIA 0.43+ (urządzenie `PCM:`),
+np. zbudowanego z `src/host/sokol` w repozytorium firmware i skopiowanego do
+`tools/rp6502-emu.exe`. Skrypt przekazuje `--memseed 42` (lub `--memfill`),
+polecenie `seed 42` w skrypcie oraz `--mtram` dla opcji `--cpb`.
+Emulator odtwarza strumień `PCM:` w czasie rzeczywistym także z `--mute`,
+więc testy nie sterują wskaźnikiem odczytu. Moduł `tests/pcm_stream.py`
+odczytuje 24-bitowe liczniki `_pcm_written`/`_pcm_consumed` i cztery strony
+bufora pośredniego, aby sprawdzić każdą stronę wysłaną do urządzenia od
+początku utworu oraz zegar sekwencera. Polecenie `wav` nagrywa rzeczywiste
+wyjście urządzenia; wymaga uruchomienia bez `--mute` (`case(..., mute=False)`).
+
 `python tests/emulator_checks.py --demo-splash-only` sprawdza dwa sprite’y
 64x64 składające się na obraz 128x64 na Y=4, bez skalowania.
 Obejmuje GAME 1–3, przejścia demo/gra, F1, F4, przezroczystość tła,
@@ -15,7 +26,8 @@ obrazów i palet po utracie ostatniego życia w GAME 1 oraz wszystkich żyć obu
 graczy w GAME 2/3, również przy F9 OFF. Obejmuje F1, mono, restart i powrót
 do demo. Sprawdza pełną sekwencję: wjazd samolotu, napis GAME OVER,
 oczekiwanie do końca melodii, odlot z napisem i nowy wjazd z ARE YOU READY.
-Sprawdza też wyciszenie oraz oczekiwanie przy zatrzymanym zegarze PCM.
+Sprawdza też wyciszenie oraz oczekiwanie na koniec melodii odtwarzanej
+w czasie rzeczywistym przez urządzenie `PCM:`.
 Wersja PCM dodatkowo porównuje próbki muzyki po podmianie grafiki,
 aby wykryć zmianę deskryptora lub pozycji pliku strumienia.
 
@@ -69,11 +81,11 @@ Poniższe zestawy obejmujące PCM wymagają dodania
 `--build build/cc65/release-pcm` do polecenia testów.
 `python tests/emulator_checks.py --build build/cc65/release-pcm --music-only`
 sprawdza pełną oprawę muzyczną:
-wybór hybrydy OPL+PCM, odpowiedź `-1` firmware na próbę uruchomienia PCM,
+wybór hybrydy OPL+PCM, odpowiedź `-1` firmware na `open("PCM:...")`,
 melodię i perkusję OPL bez PCM, nową aranżację podczas lotu oraz efekty
 na każdym backendzie. Testy porównują także dodatnie i ujemne próbki mieszane
-przez CPU, dwukrotne powtarzanie próbek efektów 8 kHz w strumieniu 16 kHz
-i zawijanie obu buforów. Sprawdzają F1, F9, wyciszanie wyjścia oraz oba jingle.
+przez CPU, dwukrotne powtarzanie próbek efektów 8 kHz w strumieniu 16 kHz,
+zawijanie bufora efektów i brak niedoboru w urządzeniu `PCM:`. Sprawdzają F1, F9, wyciszanie wyjścia oraz oba jingle.
 Porównują również próbki perkusji: pełny poziom w demo i 72,25% podczas gry,
 z niezmienionym poziomem domieszanych efektów PCM.
 Kopia oryginalnych tabel `$CB00..$CFFF` jest porównywana bajt po bajcie.
@@ -143,6 +155,10 @@ w natywnym kodzie gry i trafiają mosty 5, 20 i 50. Po mostach 5 i 20 kontynuuj�
 tę samą rozgrywkę przez dwa kolejne mosty, sprawdzając brak ponownej fanfary
 i dodatkowego życia. Numer mostu zmienia się przez naturalne przewijanie;
 kolor drogi nie może cofnąć numeru użytego do przyznania nagrody.
+W wersji PCM te scenariusze dopuszczają najwyżej 3 pominięte VSYNC-i
+(`PCM_SKIPPED_FRAMES`): synteza efektów 8 kHz i miks perkusji 16 kHz zajmują
+około 10% klatki, a urządzenie `PCM:` odtwarza strumień także z `--mute`.
+Wersja OPL2 nadal wymaga zera.
 Mosty 5 i 20 przyznają premię życia bez fanfary; fanfara gra tylko przy moście 50.
 Wersja PCM dodatkowo sprawdza mosty 1–50 w jednej rozgrywce z `/pcm`, pełne
 odtworzenie każdej fanfary przy zegarze 16 kHz, powrót partytury muzyki lotu
@@ -150,16 +166,18 @@ oraz dokładnie jedno uruchomienie fanfary i trzy premie za mosty.
 Import: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --name victory --bpm 96`.
 Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test porównuje
 rejestry OPL2 i każdą stronę perkusji PCM przez pełny utwór i początek następnej
-pętli. Symuluje odbiór 16000 próbek/s, sprawdzając synchronizację i zapas bufora.
+pętli. Przy rzeczywistym odbiorze 16000 próbek/s sprawdza synchronizację
+sekwencera z liczbą odtworzonych próbek i zapas w urządzeniu (768–1088 bajtów).
+W demie pomija głosy OPL 3/4/7/8, które `_music_effects` przejmuje dla efektów.
 Sprawdza muzykę w instrukcji, pełną pętlę alternatywnej aranżacji w demo,
 jednoczesną muzykę i efekty przy rozpoczęciu rozgrywki z każdym backendem,
 wyciszanie F9 i zachowanie obrazu po F1.
-Test wyjścia porównuje tłumienie kanałów OPL2 i opublikowane próbki PCM podczas
+Test wyjścia porównuje tłumienie kanałów OPL2 i wysłane próbki PCM podczas
 końcowego fade out, aż do ciszy.
 Wspólne funkcje ekranów zajmują 512 bajtów `reset_tiles`; odtwarzacz używa
 dodatkowo 1024 bajtów od `sprites`, odbudowywanych także po F1.
-Dane nut są w XRAM `$F900`, rejestry OPL2 w `$0100`, a nagłówek i bufor PCM
-w `$09F8..$0DFF`. Perkusja pochodzi z zasobu ROM `intro-drums.pcm`.
+Dane nut są w XRAM `$F900`, rejestry OPL2 w `$0100`, a cztery strony
+pośrednie PCM w `$0A00..$0DFF`. Perkusja pochodzi z zasobu ROM `intro-drums.pcm`.
 Ładowanie instrukcji przez F1
 nie może nadpisać kopii obrazu gry w `$F100..$F8FF`.
 
@@ -182,16 +200,16 @@ obu fade, napis SEE YOU NEXT TIME!, pełne 180 klatek i wyjście dopiero po czer
 Test utrzymuje Esc i inne klawisze; napis pozostaje nieruchomy i nie miga.
 `outro-*-held-escape` sprawdzają wyjście z pokazu i z gry oraz zatrzymanie
 wszystkich trzech backendów dźwięku przed ponownym użyciem pamięci okładki.
-`audio-*` wymagają emulatora z rozszerzeniem PCM (`XREG(0,1,2,base)`).
-Sprawdzają format 8 kHz mono, reakcję silnika na gaz, priorytet wybuchu,
-tankowania i alarmu, pauzę oraz ciszę w trybie pokazowym. Test strumienia
-symuluje odbiór 8000 próbek/s przez 1200 klatek przy przewijaniu i strzelaniu;
-kontroluje czas klatki z działającym generatorem, ponieważ `--mute` sam nie
-opróżnia bufora PCM. Testy próbek wymuszają odbiór kolejnych bloków i sprawdzają
-zawijanie bufora oraz publikowanie tylko kompletnych stron.
-`checks/audio/*-cpu.wav` zawierają próbki wygenerowane przez rzeczywisty kod
-6502: wolny/szybki silnik, wybuch i pocisk. To surowe PCM 8 kHz, bez
-interpolacji miksera i toru audio fizycznego komputera.
+`audio-*` wymagają emulatora z urządzeniem `PCM:` (RIA 0.43+).
+Sprawdzają otwarcie urządzenia i właściciela strumienia (efekty), tempo
+16 kHz, reakcję silnika na gaz, priorytet wybuchu, tankowania i alarmu,
+pauzę oraz ciszę w trybie pokazowym. Test strumienia przez 1200 klatek
+przewijania i strzelania sprawdza brak niedoboru w urządzeniu.
+Testy próbek śledzą stronę zapisu bufora syntezy i zbierają kolejne strony
+bez pominięć. `checks/audio/*-cpu.wav` zawierają próbki wygenerowane przez
+rzeczywisty kod 6502: wolny/szybki silnik, wybuch i pocisk (surowe PCM 8 kHz).
+`checks/audio/engine-device.wav` to wyjście urządzenia `PCM:` po interpolacji
+do 16 kHz i miksie firmware (48 kHz stereo).
 Opcja `--audio-only` uruchamia wyłącznie scenariusze dźwięku.
 Testy `f10-*` obejmują cykl OPL2/PCM, przytrzymanie klawisza,
 pauzę, blokadę podczas wyciszenia F9, powrót z F1 oraz przełączanie podczas
@@ -200,7 +218,8 @@ odnowienie czasu kolejnym F10 i brak odnawiania przy przytrzymaniu klawisza.
 Testy `f9-unmute-notice-*` sprawdzają usunięcie ikony wyciszenia i sekundowy
 napis po włączeniu dźwięku, także przy przytrzymaniu F9, dla każdego generatora.
 Ponieważ emulator obsługuje PCM, brak tego interfejsu jest sprawdzany przez
-symulację negatywnego wyniku funkcji wykrywającej jego dostępność.
+symulację wyniku `-1` funkcji `music_pcm_probe` i zapomnienie otwartego
+deskryptora `_pcm_fd`.
 Sam zestaw przełączania można uruchomić opcją `--audio-switch-only`.
 Pełny zestaw wymaga PCM, natomiast scenariusze `audio-opl2-*`
 wybierają backend przez rzeczywiste argumenty programu. Sprawdzają wzrost

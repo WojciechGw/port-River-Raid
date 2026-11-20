@@ -7,7 +7,7 @@ load riverraid.rp6502 [/auto | /opl2 | /pcm] [/v]
 
 Sound options:
 No option: OPL2. /auto: PCM if supported, otherwise OPL2.
-Only /pcm requires the PCM firmware extension. /help shows usage.
+Only /pcm requires RIA firmware 0.43+ (PCM: device). /help shows usage.
 /v always shows the sound icon and backend below the scroller.
 
 Keyboard:

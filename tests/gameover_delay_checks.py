@@ -15,10 +15,8 @@ def run_gameover_delay_checks(case,sym,fixture,resume,pcm_build):
                 commands += [f'peek {started} 0',f'peek {phase} 0',f'peek {kind} 2',
                     'peek 0xf8 1',f'dump 0x{sym["pcm_amplitude"]:04x} 2',
                     'dump xram:0xc900 256']
-                if pcm_build:
-                    read=(frame+1)*16000//60%1024
-                    commands += [f'poke xram:0xca06 {read&255} {read>>8}']
-                    if backend=='pcm': commands += ['dump xram:0xc008 2048']
+                if pcm_build and backend=='pcm':
+                    commands += ['dump xram:0xc008 2048']
                 commands += ['run 1']
             if final:
                 commands += [f'wait {phase} 1 30','run 2','peek 0xf8 0',

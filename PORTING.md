@@ -298,11 +298,14 @@ unchanged. The configuration at $02A0 moves the message off-screen every
 The message appears after fade in and disappears when a key is pressed,
 before fade out.
 Main music imports the firmware `riverraid_rom_gen.py --bpm 140` arrangement:
-seven OPL2 channels and signed 8-bit mono PCM drums at 16 kHz. The sequencer
+seven OPL2 channels and 8-bit mono PCM drums at 16 kHz (the repository keeps
+the generator's signed samples; the build converts them to the unsigned format
+of the `PCM:` device). The sequencer
 advances every 1712 consumed PCM samples, matching the generator's rounded
 140.186916 BPM tempo. The eight bars occupy 219136 samples (13.696 seconds).
-ROM reads refill a 1024-byte ring at $0A00, with its header at $09F8; the
-separate drum descriptor leaves palette streaming independent during fades.
+ROM reads fill four 256-byte staging pages at $0A00, each queued to the
+`PCM:` device while fewer than three pages wait; the separate drum descriptor
+leaves palette streaming independent during fades.
 Without PCM support, a display-clock fallback plays both notes and synthesized
 drums on OPL2. The capability probe precedes
 score selection; OPL2 is the only fallback synth.
@@ -311,21 +314,23 @@ The screen player borrows 1024 bytes of derived graphics tables beginning at
 The score is at $F900, above the saved F1 video at $F100..$F8FF. The initial
 manual continues the cover stream. On the mode-selection/demo screen, the
 installed runtime player decodes a quieter three-part flight variation using
-the jingle's $CA00 PCM header/$CA08 ring and $C900 OPL registers. It continues
+the jingle's $CA08 staging pages and $C900 OPL registers. It continues
 during gameplay. F1 and exit stop it before enabling the screen player. Muting suppresses
 both players. During the final farewell fade, OPL carrier attenuation rises
-to 63 while each PCM page is scaled by the picture level before publication.
+to 63 while each PCM page is scaled by the picture level before it is queued
+(a 256-byte gain table rebuilt once per fade level).
 
-Flight music reserves melodic voices 0..2. With PCM, percussion uses a separate
-16 kHz ring, leaving OPL voices 3/4/7/8 for engine/blast/shot/fuel. Without PCM,
+Flight music reserves melodic voices 0..2. With PCM, percussion uses the
+16 kHz `PCM:` stream, leaving OPL voices 3/4/7/8 for engine/blast/shot/fuel. Without PCM,
 three decaying FM voices supply percussion. In the OPL2-only build, effects use
 6 for the engine, 7 for blast/player shot (blast priority), and 8 for enemy shot
 or fuel tone. The engine retains its patch, volume and pitch through effects.
 The PCM build's legacy fallback still shares 6 between blast and engine.
 PCM effects
 retain their 8 kHz procedural ring; `music_mix_pcm` consumes each sample twice
-at half gain into the 16 kHz percussion page before publishing it. It advances
-the effects read pointer itself because firmware consumes only the music ring.
+at half gain into the 16 kHz percussion page before queuing it, in the same
+pass that scales gameplay percussion. It advances the effects read pointer
+itself, since only the music page reaches the device.
 Before mixing effects, gameplay flight percussion is scaled to 72.25% (two
 successive 15% reductions, rounded only once) using a
 signed 8-bit lookup table with symmetric rounding. This applies with either
@@ -510,8 +515,9 @@ The game-over tune plays once, then resumes the flight arrangement.
 Mute, pause, restart, help and backend/mode changes cancel playback. An automatic
 GAME 2 turn change does not trigger it while the other pilot has planes left.
 With no PCM support, VSYNC clocks a complete OPL2 arrangement with drums.
-The score occupies XRAM $F900, OPL2 registers $C900, and the PCM header/ring
-$CA00/$CA08 (1024 bytes). ROM pages stream three pages ahead of the consumer.
+The score occupies XRAM $F900, OPL2 registers $C900, and four PCM staging
+pages at $CA08 (1024 bytes). ROM pages are queued while fewer than three pages
+wait in the `PCM:` device.
 After initial video setup, the player replaces startup-only argument parsing,
 palette conversion in `STARTUP_AUDIO`; its temporary ZP copy routine then becomes
 player state. This preserves the 1 KiB stack and survives returning from F1.
@@ -569,19 +575,30 @@ Wavelets analyze the reference offline; the chip uses its fixed waveforms.
 
 PCM uses two procedural voices at 8 kHz signed mono. The engine has a
 17-bit polynomial clocked according to throttle. A two-sample average and
-the PCM mixer's interpolation soften upper harmonics. The death burst uses
+linear interpolation to 16 kHz soften upper harmonics. The death burst uses
 a 2 kHz polynomial clock and retains the native half-second volume decay.
-The PCM header is at XRAM `$C000`, with a 2048-byte ring at `$C008`. OPL2
-reuses the `$C000` page only when PCM is not selected. CPU RAM `$C000`
-holds music code; these are separate address spaces.
+The synth ring is at XRAM `$C008` (2048 bytes); `$C006/7` holds its read
+pointer. OPL2 reuses the `$C000` page only when PCM is not selected. CPU RAM
+`$C000` holds music code; these are separate address spaces.
 The cover temporarily occupies this XRAM range, so audio initializes after
-cover and graphics preparation. Two silent pages prime the PCM stream.
-Each frame prepares at most 160 samples, publishing only complete 256-byte
-pages through an atomic high-byte write. The queue target includes 512
-prepared samples. The loop uses zero page below `$80`, leaves the native
+cover and graphics preparation.
+Each frame prepares at most 160 samples, in chunks up to the page end; a
+cheaper loop runs while the second voice is silent. The queue target includes
+512 prepared samples. The loop uses zero page below `$80`, leaves the native
 game RNG untouched and rounds clocks to 31.25 Hz steps (15.625 Hz tones).
-Only PCM requires the firmware extension `XREG(0,1,2,base)`. OPL2 uses
-the standard [RIA sound interfaces](https://picocomputer.github.io/ria.html#yamaha-opl2-fm-sound-generator).
+
+PCM requires RIA firmware 0.43 or newer, which provides the `PCM:` device.
+The game opens `PCM:16000,8,1` (16 kHz, 8-bit unsigned, mono) once, on first
+use, and keeps it until exit; `open` failing is the capability probe. One
+owner feeds it at a time: the effects (each completed synth page interpolated
+to 512 unsigned bytes at `$CA08` and queued with `write_xram`) or the music,
+intro and jingle players (their mixed pages). Starting or stopping an owner
+empties the device with `lseek(SEEK_SET)`. The firmware buffers 8192 bytes;
+the game treats it as 4096 and keeps at most about 1 KiB queued. Sequencers
+are clocked by the samples actually played: 24-bit counts of bytes written
+and of written minus `lseek(SEEK_CUR)` (the queued level) at each frame's
+clock. OPL2 uses the standard
+[RIA sound interfaces](https://picocomputer.github.io/ria.html#yamaha-opl2-fm-sound-generator).
 
 All backends preserve refueling/alarm sequences. Missiles descend from
 about 400 to 200 Hz over 18 frames (0.3 seconds). OPL2 keeps the engine,
@@ -596,7 +613,7 @@ temporarily uses the fuel-tone voice, preserving player fire, explosions and
 music. PCM temporarily replaces the engine/fuel voice, with crashes retaining
 priority. Pause, mute, death and F1 discard the enemy-shot tail.
 Death cancels the engine and missile tail. Pause and attract mode suppress
-effects (demo music continues). Explicit OPL2 initialization stops any PCM stream, and exiting
+effects (demo music continues). Explicit OPL2 initialization empties the PCM stream, and exiting
 releases the selected sound device.
 
 The emulator checks export `audio-opl2-*.json` register traces and actual
@@ -666,13 +683,20 @@ the banks, continuity of the brown contour at bends, and the rim crossing
 the road. The other scenarios that end in gameplay also check for skipped
 VSYNCs, including respawning, refueling, and player switching. The optional
 frame-phase profiler is described in `tests/README.md`.
-Audio tests check PCM registration, throttle response, effect/alarm priority,
-pause and attract-mode silence. They export actual CPU-generated samples,
-check ring wrap and publication, and simulate 8 kHz consumption while scrolling
-and firing. Additional OPL2 scenarios use real load arguments, check engine
+Audio tests check `PCM:` device ownership, throttle response, effect/alarm
+priority, pause and attract-mode silence. The emulator (RIA 0.43+) consumes the
+`PCM:` stream in real time even with `--mute`, so the tests follow the pages
+actually queued, export actual CPU-generated samples, record the device's own
+output (`wav`, unmuted) and check for underruns while scrolling and firing.
+Additional OPL2 scenarios use real load arguments, check engine
 pitch/texture, priorities, pause/demo silence, exit and 1200-frame budgets.
 Argument tests cover backend selection, uppercase options, help and errors.
 Muted tests do not verify listening quality or real hardware timing.
+In the PCM build, 8 kHz effects synthesis and the 16 kHz percussion mix cost
+about a tenth of a frame, so full-speed travel through bridges can skip a few
+VSYNCs; the `victory-natural-bridge*-progression` checks allow at most three
+per scenario there (none in the OPL2-only build). Earlier emulators did not
+consume PCM under `--mute` and hid this cost.
 
 Listening tests, frame-by-frame raster comparisons with an Atari emulator,
 and testing on physical RP6502 hardware remain outstanding. Game logic

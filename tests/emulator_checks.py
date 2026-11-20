@@ -241,13 +241,19 @@ def run_audio_checks(case,sym,fixture,resume,start,output):
     effects_only=[poke(sym['gameover_update'],[0xa9,0,0xaa,0x60])]
     fixture=effects_only+fixture
     start=effects_only+start
-    # PCM must be explicitly supported; pausing silences effects.
+    # PCM must be explicitly supported; pausing silences effects. Effects own
+    # the firmware's PCM: device (owner 1) and keep its queue near 1024 bytes.
     _, samples=case("audio-pcm-init-and-pause",fixture+[
-        f'peek 0x{sym["pcm_enabled"]:04x} 1',"dump xram:0xc000 8",
-        f'dump 0x{sym["pcm_amplitude"]:04x} 2'],rom_args=("/pcm",))
-    header,amplitude=samples
-    assert header[2:6]==bytes((3,11,0x40,0x1f)), "PCM format/rate/ring mismatch"
+        f'peek 0x{sym["pcm_enabled"]:04x} 1',f'peek 0x{sym["pcm_owner"]:04x} 1',
+        f'dump 0x{sym["pcm_fd"]:04x} 1',f'dump 0x{sym["pcm_written"]:04x} 2',"run 30",
+        f'dump 0x{sym["pcm_written"]:04x} 2',f'dump 0x{sym["pcm_amplitude"]:04x} 2',
+        f'dump 0x{sym["pcm_empty"]:04x} 2'],rom_args=("/pcm",))
+    fd,before,after,amplitude,empty=samples
+    assert fd[0]<0x80, "PCM: device was not opened"
+    written=(int.from_bytes(after,"little")-int.from_bytes(before,"little"))&0xffff
+    assert 30*16000//60-1024 <= written <= 30*16000//60+1024, "Effects did not keep pace with 16 kHz"
     assert not any(amplitude), "Pause retained audible voices"
+    assert not any(empty), "PCM: device ran dry while effects owned it"
 
     audio_dump=[f'dump 0x{sym["pcm_amplitude"]:04x} 2',
                 f'dump 0x{sym["pcm_step"]:04x} 4',f'dump 0x{sym["pcm_tone"]:04x} 2']
@@ -282,31 +288,35 @@ def run_audio_checks(case,sym,fixture,resume,start,output):
         if effect=="explosion":
             assert struct.unpack_from("<H",steps)[0]*8000/65536==2000, "Death blast is too bright"
 
-    # --mute does not consume PCM. Advance its read pointer explicitly, taking
-    # actual CPU-produced pages, rather than validating a Python synthesizer.
+    # The PCM: device consumes in real time, also under --mute. Follow the
+    # synth ring's write page and collect actual CPU-produced 8 kHz pages,
+    # rather than validating a Python synthesizer. The device's own 16 kHz
+    # output is recorded separately (wav needs an unmuted emulator).
     import wave
     audio_output=output / "audio"
     audio_output.mkdir(exist_ok=True)
-    for name,setup,pages in (
-        ("engine-slow",["press down","run 60"],24),
-        ("engine-fast",[poke(0xb5,254),"press up","run 2"],24),
-        ("explosion",[poke(0xf8,[1,31])],8),
-        ("missile",[poke(0xfb,15)],5),
+    for name,setup,frames in (
+        ("engine-slow",["press down","run 60"],96),
+        ("engine-fast",[poke(0xb5,254),"press up","run 2"],96),
+        ("explosion",[poke(0xf8,[1,31])],32),
+        ("missile",[poke(0xfb,15)],20),
     ):
-        commands=fixture+[poke(0xf8,[0]*4)]+resume+setup
-        for page in range(pages):
-            index=(page*2+2)&7   # startup silence occupies two pages
+        commands=fixture+[poke(0xf8,[0]*4)]+resume+setup+["dump xram:0xc000 2056"]
+        for frame in range(0,frames,2):
             # Keep this listening fixture in its safe corridor: no course
             # advance, fuel alarm, enemy hit or refueling during engine capture.
-            commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),
-                         poke(0xc006,[0,index]).replace("poke ","poke xram:",1),"run 4",
-                         "dump xram:0xc000 2",f"dump xram:0x{0xc008+index*256:04x} 512"]
-        _, buffers=case(f"audio-capture-{name}",commands,rom_args=("/pcm",))
+            commands += [poke(0xa0,[0]*6),poke(0x8b,[0,0]),poke(0xb7,255),"run 2",
+                         "dump xram:0xc000 2056"]
+        _, rings=case(f"audio-capture-{name}",commands,rom_args=("/pcm",))
         data=bytearray()
-        for page in range(pages):
-            pointer,block=buffers[page*2:page*2+2]
-            assert pointer==bytes((0,(page*2+4)&7)), "PCM producer failed to publish/wrap an atomic page"
-            data.extend(block)
+        previous=rings[0][1]
+        for ring in rings[1:]:
+            page=ring[1]
+            assert (page-previous)&7 <= 2, "PCM producer fell behind or skipped pages"
+            while previous!=page:
+                data.extend(ring[8+previous*256:8+previous*256+256])
+                previous=(previous+1)&7
+        assert len(data)>=(frames*8000//60)-1024, "PCM producer did not keep pace with 8 kHz"
         signed=[v if v<128 else v-256 for v in data]
         assert max(signed)<=60 and min(signed)>=-60, "PCM mixer overflow/clipping"
         assert len(set(signed))>2, "PCM filtering/noise generator is stuck"
@@ -314,14 +324,24 @@ def run_audio_checks(case,sym,fixture,resume,start,output):
             wav.setparams((1,2,8000,len(signed),"NONE","not compressed"))
             wav.writeframes(struct.pack(f"<{len(signed)}h",*(v*256 for v in signed)))
 
-    # Stress actual generation during scrolling and firing at 8000 samples/s.
-    # The scripted consumer has the same fractional 133/134-sample cadence
-    # as 8 kHz / 60 Hz; it starts after the queued startup silence.
-    commands=start+["press up space"]
-    for frame in range(1200):
-        pointer=((frame*8000)//60)&2047
-        commands += [poke(0xc006,list(struct.pack("<H",pointer))).replace("poke ","poke xram:",1),"run 1"]
-    case("audio-stream-frame-budget",commands+["release up space","run 2"],rom_args=("/pcm",))
+    # The firmware's own mix of the queued 16 kHz unsigned stream.
+    device=audio_output/"engine-device.wav"
+    case("audio-device-output",fixture+[poke(0xf8,[0]*4)]+resume+["press up","run 30",
+        f'wav "{device.as_posix()}" 60'],rom_args=("/pcm",),mute=False)
+    with wave.open(str(device)) as wav:
+        frames=wav.readframes(wav.getnframes())
+    left=struct.unpack(f"<{len(frames)//2}h",frames)[::2]
+    assert max(map(abs,left))>256, "PCM: device output is silent"
+    assert len(set(left))>16, "PCM: device output is stuck"
+
+    # Stress actual generation during scrolling and firing for 20 seconds,
+    # against the device's real-time consumer: no underrun is allowed.
+    commands=start+["press up space","run 1200",
+                    f'dump 0x{sym["pcm_refills"]:04x} 2',f'dump 0x{sym["pcm_empty"]:04x} 2']
+    _,counters=case("audio-stream-frame-budget",commands+["release up space","run 2"],rom_args=("/pcm",))
+    refills,empty=(int.from_bytes(c,"little") for c in counters)
+    assert refills>=1200*8000//60//256-8, "PCM producer did not keep pace in gameplay"
+    assert empty==0, "PCM: device ran dry during gameplay"
     run_synth_checks(case,sym,fixture,resume,start,output)
 
 
@@ -492,19 +512,25 @@ def main():
     print("PASS load-map-cpb-and-io", flush=True)
     count = 1
 
-    def case(name, commands, fill="random", gameplay=True,rom_args=()):
+    def case(name, commands, fill="random", gameplay=True,rom_args=(),mute=True):
         nonlocal count
         # Allow the next loop to account for the last rendered frame, including
         # full resets/respawns. The exit case has already returned to the OS.
         if gameplay and not commands[-1].startswith("expect-exit"):
             commands = commands + ["run 2", "peek xram:0x009e 0 0"]
+        # RIA 0.43+ script syntax: wait for the exit, then check its code.
+        commands = [line for command in commands for line in (
+            [f"wait exit {command.split()[2]}", f"expect exit {command.split()[1]}"]
+            if command.startswith("expect-exit ") else [command])]
         script = output / f"{name}.script"
-        script.write_text("\n".join(commands) + "\n", encoding="utf-8")
+        script.write_text("\n".join(["seed 42"] + commands) + "\n", encoding="utf-8")
+        memory = ["--memseed", "42"] if fill == "random" else ["--memfill", fill]
         process = subprocess.run([
             str(args.emulator.resolve()), str(build / "riverraid.rp6502"),
-            "--script", str(script), "--mute", "--phi2", "8000", "--seed", "42",
-            "--fill", fill, "--save-dir", str(output / "save"),
-            *(["--cpb"] if args.cpb else []),
+            # --mute also silences the script's wav recordings.
+            "--script", str(script), *(["--mute"] if mute else []), "--phi2", "8000", *memory,
+            "--save-dir", str(output / "save"),
+            *(["--mtram"] if args.cpb else []),
             "--",*rom_args,
         ], cwd=ROOT, text=True, capture_output=True, timeout=60)
         # Some emulator releases report a script error with exit code zero.

@@ -1,14 +1,19 @@
 ; Procedural XL/XE-style audio, 8 kHz mono signed PCM.
-; RIA PCM extension: XREG(0,1,2,$C000), 2048-byte ring at $C008.
-; Publish completed 256-byte pages atomically (write_ptr low stays zero).
+; The synth fills a 2048-byte ring at $C008; $C006/7 holds its read pointer.
+; While effects own the firmware's PCM: device, each completed 256-byte page
+; is interpolated to 512 unsigned 16 kHz bytes at $CA08 and queued. While
+; music owns it, the music player consumes this ring and moves the pointer.
 ; Prepare at most 160 samples per frame, keeping 512 samples queued including
 ; the unfinished page. This spreads CPU work across VSYNCs without IRQ work.
 .include "rp6502.inc"
+.macpack longbranch
 .export _opl_commit
 .import _opl_a, _opl_b, _opl_volume
 .if RIVER_PCM
 .export _pcm_feed, _pcm_reset, _pcm_refills, _pcm_empty
 .import _pcm_amplitude, _pcm_step, _pcm_tone
+.import _pcm_owner, pcm_dev_level, pcm_dev_write, PCM_BUF_LIMIT
+STAGE = $CA08                 ; Music staging ring, idle while effects own PCM.
 
 .segment "ZEROPAGE"
 poly: .res 6
@@ -30,6 +35,8 @@ zero_end:
 .segment "BSS"
 _pcm_refills: .res 2
 _pcm_empty: .res 2
+completed: .res 1             ; Bit 7: a page awaits the device; bits 0-2: page.
+upsample: .res 1              ; Last unsigned sample, for interpolation.
 
 .segment "CODE"
 .macro voice n
@@ -85,6 +92,10 @@ _pcm_reset:
     sta poly,x
     dex
     bpl :-
+    sta completed
+    lda #$80
+    sta upsample
+    lda #0
     sta _pcm_refills
     sta _pcm_refills+1
     sta _pcm_empty
@@ -107,6 +118,25 @@ _pcm_reset:
 _pcm_feed:
     lda #1
     sta RIA_STEP1
+    lda _pcm_owner
+    cmp #1
+    bne feed_read
+    ; The device plays two bytes per synth sample. Model its queue as the
+    ; ring's read pointer, so published pages count until they are played.
+    jsr pcm_dev_level
+    stx read_hi
+    lsr read_hi
+    ror a
+    sta read_lo
+    sec
+    lda #0
+    sbc read_lo
+    sta read_lo
+    lda write_page
+    sbc read_hi
+    and #7
+    sta read_hi
+    bra feed_queued
 feed_read:
     lda #7
     sta RIA_ADDR1
@@ -121,6 +151,7 @@ feed_read:
     lda RIA_RW1
     cmp read_hi
     bne feed_read
+feed_queued:
     ; Include prepared-but-unpublished samples in the queue target.
     sec
     lda partial
@@ -206,7 +237,26 @@ feed_value:
     lda write_page
     adc #$c0
     sta RIA_ADDR1+1
-    ldy count
+feed_chunk:
+    ; Work in chunks up to the page end, so the sample loop counts only Y.
+    sec
+    lda #0
+    sbc partial
+    beq :+                    ; At a page start a whole page is free.
+    cmp count
+    bcc :++
+:   lda count
+:   sta available             ; Samples in this chunk.
+    tay
+    clc
+    adc partial
+    sta partial               ; Zero once the chunk completes its page.
+    sec
+    lda count
+    sbc available
+    sta count
+    lda amplitude+1
+    jeq feed_one
 feed_sample:
     voice 0
     sta mixed
@@ -221,13 +271,27 @@ feed_sample:
     ror a
     sta RIA_RW1
     stx previous
-    inc partial
-    beq feed_publish
-feed_next:
     dey
-    beq feed_done
+    beq feed_chunk_done
     jmp feed_sample
-feed_publish:
+; The second voice is silent, as usual in flight: the same samples, cheaper.
+feed_one:
+    voice 0
+    tax
+    clc
+    adc previous
+    cmp #$80
+    ror a
+    sta RIA_RW1
+    stx previous
+    dey
+    bne feed_one
+feed_chunk_done:
+    lda partial
+    bne feed_more
+    lda write_page
+    ora #$80
+    sta completed
     inc write_page
     lda write_page
     and #7
@@ -248,11 +312,52 @@ feed_publish:
     sta RIA_ADDR1+1
 :
     inc _pcm_refills
-    bne feed_next
+    bne feed_more
     inc _pcm_refills+1
-    jmp feed_next
+feed_more:
+    lda count
+    jne feed_chunk
 feed_done:
+    lda completed
+    bpl @done
+    and #7
+    stz completed
+    ldx _pcm_owner
+    cpx #1
+    bne @done
+    ; Linear interpolation to 16 kHz, offset to unsigned: the midpoint with
+    ; the previous sample, then the sample itself.
+    clc
+    adc #$c0
+    sta RIA_ADDR1+1
+    lda #8
+    sta RIA_ADDR1
+    sta RIA_ADDR0
+    lda #>STAGE
+    sta RIA_ADDR0+1
+    lda #1
+    sta RIA_STEP0
+    sta RIA_STEP1
+    ldy #0
+@sample:
+    lda RIA_RW1
+    eor #$80
+    tax
+    clc
+    adc upsample
+    ror a
+    sta RIA_RW0
+    stx RIA_RW0
+    stx upsample
+    iny
+    bne @sample
+    lda #<STAGE
+    ldx #>STAGE
+    ldy #2
+    jmp pcm_dev_write
+@done:
     rts
+.assert 1024+512 <= PCM_BUF_LIMIT, lderror, "Effects queue exceeds the PCM buffer budget"
 .endif
 
 ; Commit the nine prepared OPL voices through one portal setup. Read the

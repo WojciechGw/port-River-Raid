@@ -4,6 +4,40 @@ import json
 import struct
 from pathlib import Path
 from emulator_checks import poke
+from pcm_stream import Stream, snapshot
+
+
+def follow_jingle(case, sym, name, commands, pcm, records, rom_args=()):
+    """Snapshot each frame of a one-shot jingle: every queued page must match
+    the ROM and the OPL registers must hold the records due at the sample
+    clock (or the one before, when the clock just crossed a record)."""
+    frames = len(pcm)*60//16000+8
+    for _ in range(frames):
+        commands = commands+snapshot(sym,0xca08,['dump xram:0xc900 256'])+['run 1']
+    _, observed = case(name, commands, rom_args=rom_args)
+    observed = observed[-4*frames:]
+    stream = Stream()
+    states = [bytearray(256)]
+    starts = [0]
+    for record in records:
+        state = bytearray(states[-1])
+        for reg, value in record['writes']:
+            state[reg] = value
+        states.append(state)
+        starts.append(starts[-1]+record['samples'])
+    checked = 0
+    for written, consumed, ring, registers in zip(*[iter(observed)]*4):
+        if not stream.add(written, consumed, ring):
+            break               # The jingle ended and flight music restarted.
+        due = sum(1 for start in starts[:-1] if start <= stream.consumed)
+        assert registers in (states[due], states[due-1]), f'{name}: OPL differs at sample {stream.consumed}'
+        checked += 1
+    pages = stream.contiguous()
+    # The first snapshot can follow the start by a few frames.
+    assert pages[0] <= 8 and pages[-1] == len(pcm)//256-1, f'{name}: jingle pages {pages[0]}..{pages[-1]}'
+    for page in pages:
+        assert stream.pages[page] == pcm[page*256:(page+1)*256], f'{name}: PCM differs at page {page}'
+    return checked
 
 
 def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
@@ -12,8 +46,10 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
     root = Path(__file__).resolve().parents[1]
     score = json.loads((root/'src/gameover-score.json').read_text())
     pcm = (root/'assets/gameover.pcm').read_bytes()
-    assert assets['gameover.pcm'] == pcm
     assert hashlib.sha256(pcm).hexdigest() == score['pcm_sha256']
+    # The ROM holds the unsigned copy the PCM: device plays.
+    pcm = bytes(b ^ 0x80 for b in pcm)
+    assert assets['gameover.pcm'] == pcm
     assert score['bpm'] == 200 and len(pcm) == score['samples'] == 107264
     active = f'peek 0x{sym["gameover_active"]:04x}'
     started = f'peek 0x{sym["gameover_started"]:04x}'
@@ -37,34 +73,13 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
             poke(0xc5,sym['rr_Copyright0']&255)]+last+resume+begin+[active+' 1',started+' 1',
                 'run 100',active+' 1',started+' 1'])
 
-    # Drive the hardware sample clock; --mute does not consume the PCM ring.
-    # This checks each streamed page, variable note lengths and the final tail.
-    commands = fixture+last+resume+begin+['dump xram:0xca08 768']
-    for page in range(1,len(pcm)//256):
-        # Let the gameplay render/audio phase finish before sampling a newly
-        # published page; a single VSYNC can stop before that frame's refill.
-        commands += [f'poke xram:0xca06 0 {page%4}', 'run 2',
-                     'dump xram:0xc900 256']
-        if page+2 < len(pcm)//256:
-            commands += [f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
-    commands += [f'poke xram:0xca06 0 {(len(pcm)//256)%4}', 'run 2',
-                 active+' 1',kind+' 2',started+' 1','run 30',started+' 1']
-    _, data = case('gameover-complete-score-and-pcm',commands)
-    assert data.pop(0) == pcm[:768]
-    expected = bytearray(256)
-    record_index, end = 0, 0
-    for page in range(1,len(pcm)//256):
-        while page*256 >= end:
-            record = score['records'][record_index]
-            for reg,value in record['writes']:
-                expected[reg] = value
-            end += record['samples']
-            record_index += 1
-        assert data.pop(0) == expected, f'OPL score differs at page {page}'
-        if page+2 < len(pcm)//256:
-            chunk = data.pop(0)
-            assert chunk == pcm[(page+2)*256:(page+3)*256], f'PCM differs at page {page}'
-    assert not data
+    # The PCM: device clocks the jingle in real time, also under --mute.
+    # This checks each queued page, variable note lengths and the final tail.
+    follow_jingle(case, sym, 'gameover-complete-score-and-pcm', fixture+last+resume+begin,
+                  pcm, score['records'])
+    case('gameover-complete-returns-to-flight', fixture+last+resume+begin+[
+        f'run {len(pcm)*60//16000+20}', active+' 1', kind+' 2', started+' 1',
+        'run 30', started+' 1'])
 
     for name, action in (('mute',['press f9']),('pause',['press p']),('restart',['press r']),
                          ('backend',['press f10']),('mode',['press f2'])):

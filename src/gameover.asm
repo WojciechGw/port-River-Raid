@@ -15,6 +15,7 @@
 .import music_enable, music_fallback_load, music_page
 .if RIVER_PCM
 .import music_probe, music_mix_pcm, _music_synth, music_fx_read, MUSIC_SCORE_BYTES
+.import pcm_dev_queued, pcm_dev_write, pcm_dev_consumed, pcm_dev_flush, PCM_BUF_LIMIT
 .endif
 .export _gameover_install, _gameover_update, _gameover_stop
 .export _gameover_active := active, _gameover_started := started
@@ -22,9 +23,9 @@
 .export _jingle_kind := kind
 
 SCORE = $F900
-PCM = $CA00
-RING = PCM+8
+RING = $CA08                  ; Four staging pages queued to the PCM: device.
 OPL = $C900
+FEED_AHEAD = 3*256            ; Queue at most three pages ahead of playback.
 
 .segment "BSS"
 installed: .res 1
@@ -42,8 +43,6 @@ pcm_supported = state_begin
 cursor = state_begin+1
 remaining = state_begin+3
 duration = state_begin+5
-read_ptr = state_begin+7
-previous = state_begin+9
 write_page = state_begin+11
 delta = state_begin+12
 pages = state_begin+14
@@ -240,33 +239,10 @@ update:
 .if RIVER_PCM
     lda pcm_supported
     beq @fallback
-    stz RIA_STEP1
-    lda #>PCM
-    sta RIA_ADDR1+1
-@read:
-    lda #<(PCM+7)
-    sta RIA_ADDR1
-    lda RIA_RW1
-    sta read_ptr+1
-    dec RIA_ADDR1
-    lda RIA_RW1
-    sta read_ptr
-    inc RIA_ADDR1
-    lda RIA_RW1
-    cmp read_ptr+1
-    bne @read
-    sec
-    lda read_ptr
-    sbc previous
+    ; Samples the device played since the last frame clock the sequencer.
+    jsr pcm_dev_consumed
     sta delta
-    lda read_ptr+1
-    sbc previous+1
-    and #3
-    sta delta+1
-    lda read_ptr
-    sta previous
-    lda read_ptr+1
-    sta previous+1
+    stx delta+1
     jsr feed
     bra @advance
 @fallback:
@@ -394,19 +370,6 @@ start:
     iny
     bne @clear
 .if RIVER_PCM
-    lda #<PCM
-    sta RIA_ADDR0
-    lda #>PCM
-    sta RIA_ADDR0+1
-    ldy #0
-@header:
-    lda header,y
-    sta RIA_RW0
-    iny
-    cpy #8
-    bne @header
-    lda #<PCM
-    ldx #>PCM
     jsr music_probe
     lda _music_synth
     beq @hybrid
@@ -499,12 +462,10 @@ sequence:
     rts
 
 .if RIVER_PCM
+.assert FEED_AHEAD+256 <= PCM_BUF_LIMIT, lderror, "Music queue exceeds the PCM buffer budget"
 feed:
-    lda write_page
-    sec
-    sbc read_ptr+1
-    and #3
-    cmp #3
+    jsr pcm_dev_queued        ; The frame's clock just measured the level.
+    cpx #>FEED_AHEAD
     bcs @done
     lda pages
     ora pages+1
@@ -529,6 +490,13 @@ feed:
     jsr boot_read_xram
     lda write_page
     jsr music_mix_pcm
+    lda write_page
+    clc
+    adc #>RING
+    tax
+    lda #<RING
+    ldy #1
+    jsr pcm_dev_write
     lda pages
     bne @decrement
     dec pages+1
@@ -538,12 +506,6 @@ feed:
     lda write_page
     and #3
     sta write_page
-    lda #<(PCM+1)
-    sta RIA_ADDR0
-    lda #>PCM
-    sta RIA_ADDR0+1
-    lda write_page
-    sta RIA_RW0
     bra feed
 @done:
     rts
@@ -555,7 +517,7 @@ stop:
     stz active
     xreg 0,1,1,$ffff
 .if RIVER_PCM
-    xreg 0,1,2,$ffff
+    jsr pcm_dev_flush
     lda pcm_supported
     beq @done
     jsr boot_close
@@ -764,7 +726,6 @@ victory_score_path: .asciiz "ROM:victory-score.bin"
 victory_pcm_path: .asciiz "ROM:victory.pcm"
 music_score_path: .asciiz "ROM:flight-score.bin"
 music_pcm_path: .asciiz "ROM:flight-drums.pcm"
-header: .byte 0,0,3,10,$80,$3e,0,0
 .endif
 
 .segment "SPLASH"

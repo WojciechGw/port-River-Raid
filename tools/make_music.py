@@ -86,7 +86,8 @@ def pcm_drums(score):
             else:
                 value = rng.uniform(-1,1)*math.exp(-t/0.009)*0.12
             samples[start+i] += value
-    return bytes(max(-127,min(127,round(v*100*FLIGHT_GAIN)))&255 for v in samples)
+    # Unsigned 8-bit, the format of the firmware's PCM: device.
+    return bytes(128+max(-127,min(127,round(v*100*FLIGHT_GAIN))) for v in samples)
 
 
 def compact(score, flight=False):

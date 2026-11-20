@@ -63,13 +63,15 @@ _Static_assert(XRAM_HELP_VIDEO + HELP_VIDEO_BYTES <= XRAM_INTRO_SCORE, "Help bac
 #define XRAM_COVER_PROMPT_PALETTE 0x0850
 #define XRAM_OUTRO_PROMPT_IMAGE 0x0900
 #define XRAM_PALETTE 0x0100
-/* PCM extension: mono signed 8-bit, 8000 Hz, 2048-byte ring after header.
+/* Effects synth: mono signed 8-bit, 8000 Hz, 2048-byte ring after a header
+ * whose bytes 6/7 hold its read pointer. Pages are queued to the firmware's
+ * PCM: device (16 kHz unsigned) through the music staging ring below.
  * Initialized after the cover, whose pixels temporarily occupy this space. */
 #define XRAM_PCM 0xC000
 /* OPL2 reuses this page only when PCM is not selected. */
 #define XRAM_OPL XRAM_PCM
-/* Music has its own OPL mirror and 16 kHz PCM ring. Procedural PCM
- * effects are consumed from XRAM_PCM and mixed into each published page. */
+/* Music has its own OPL mirror and 16 kHz unsigned PCM staging ring. Procedural
+ * effects are consumed from XRAM_PCM and mixed into each queued page. */
 #define XRAM_MUSIC_SYNTH 0xC900
 #define XRAM_MUSIC_PCM 0xCA00
 _Static_assert(XRAM_PCM + 8 + 2048 <= XRAM_MUSIC_SYNTH, "Effects overlap music");

@@ -147,7 +147,7 @@ else()
         string(REPLACE " /opl2 | /pcm" " /opl2" RIVER_HELP "${RIVER_HELP}")
         string(REPLACE "No option: OPL2. /auto: PCM if supported, otherwise OPL2."
             "OPL2-only build. All music, percussion and effects use OPL2." RIVER_HELP "${RIVER_HELP}")
-        string(REPLACE "Only /pcm requires the PCM firmware extension. /help shows usage."
+        string(REPLACE "Only /pcm requires RIA firmware 0.43+ (PCM: device). /help shows usage."
             "/auto and /opl2 select OPL2. /help shows usage." RIVER_HELP "${RIVER_HELP}")
         string(REGEX REPLACE "F10:[^\n]*\n" "" RIVER_HELP "${RIVER_HELP}")
         string(REPLACE "/v always shows the sound icon and backend below the scroller."
@@ -158,7 +158,16 @@ else()
     rp6502_byproducts(riverraid ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
     rp6502_asset(riverraid intro.bin ${CMAKE_CURRENT_BINARY_DIR}/riverraid.intro)
     if(RIVER_PCM)
-        rp6502_asset(riverraid intro-drums.pcm assets/intro-drums.pcm)
+        # The repository keeps the generators' signed samples; the PCM: device
+        # takes unsigned 8-bit, so the ROM gets converted copies.
+        foreach(pcm intro-drums gameover victory)
+            add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${pcm}.pcm
+                COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tools/pcm_unsigned.py
+                    ${CMAKE_CURRENT_SOURCE_DIR}/assets/${pcm}.pcm ${CMAKE_CURRENT_BINARY_DIR}/${pcm}.pcm
+                DEPENDS assets/${pcm}.pcm tools/pcm_unsigned.py
+                VERBATIM)
+        endforeach()
+        rp6502_asset(riverraid intro-drums.pcm ${CMAKE_CURRENT_BINARY_DIR}/intro-drums.pcm)
         rp6502_asset(riverraid intro-score.bin ${RIVER_INTRO_SCORE})
     endif()
     foreach(asset IN LISTS RIVER_MUSIC_ASSETS)
@@ -171,9 +180,9 @@ else()
     rp6502_asset(riverraid gameover-code.bin ${CMAKE_CURRENT_BINARY_DIR}/riverraid.gameover)
     if(RIVER_PCM)
         rp6502_asset(riverraid gameover-score.bin ${RIVER_GAMEOVER_SCORE})
-        rp6502_asset(riverraid gameover.pcm assets/gameover.pcm)
+        rp6502_asset(riverraid gameover.pcm ${CMAKE_CURRENT_BINARY_DIR}/gameover.pcm)
         rp6502_asset(riverraid victory-score.bin ${RIVER_VICTORY_SCORE})
-        rp6502_asset(riverraid victory.pcm assets/victory.pcm)
+        rp6502_asset(riverraid victory.pcm ${CMAKE_CURRENT_BINARY_DIR}/victory.pcm)
     endif()
     # Named assets are read from ROM: on demand; they are not preloaded to XRAM.
     rp6502_asset(riverraid cover.bin ${RIVER_COVER_IMAGE})

@@ -123,8 +123,9 @@ Select GAME 3 with F2 and start with Space or Enter.
 Requirements: CMake 3.21+, Ninja, Python 3, and cc65 with the `rp6502` target.
 SDK installation instructions: https://picocomputer.github.io/sdk.html
 
-OPL2 uses the standard RIA sound interface. Only PCM requires the
-firmware extension `XREG(0,1,2,base)`. Building this game does not update
+OPL2 uses the standard RIA sound interface. PCM uses the RIA's `PCM:` device
+(firmware 0.43 or newer): the game opens `PCM:16000,8,1` once and queues
+unsigned 8-bit samples to it. Building this game does not update
 firmware on the physical computer. See [PORTING.md](PORTING.md) for details.
 
 The default build uses OPL2 for all music, percussion and effects.
@@ -266,7 +267,9 @@ Diagnostics are described in [tests/README.md](tests/README.md).
 
 - `src/main.c`: RIA/VGA configuration, raster rendering, input, and collisions.
 - `src/audio.c`: command-line audio selection and OPL2 FM patches.
-- `src/audio.asm`: clocked noise, tones and streaming PCM ring producer.
+- `src/audio.asm`: clocked noise, tones and the effects ring queued to `PCM:`.
+- `src/music.asm`: the shared `PCM:` device helpers, music/effects mixing and
+  OPL voice merging.
 - `src/graphics.h`: Atari 5200-inspired palette and readable bitmaps for balloons,
   tanks, mountains, banks, and panel lettering.
 - `src/riverraid.asm`: fast scanline transfers and sprite/terrain collisions.

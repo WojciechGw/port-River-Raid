@@ -12,6 +12,9 @@
 .if RIVER_PCM
 .export music_probe, _music_pcm_probe, music_mix_pcm, music_fx_read
 .export _music_fx_read := music_fx_read
+.export _pcm_dev_start, pcm_dev_level, pcm_dev_write, pcm_dev_consumed, pcm_dev_queued
+.export _pcm_dev_flush := pcm_dev_flush, pcm_dev_flush, _pcm_dev_level := pcm_dev_level
+.export _pcm_fd, _pcm_owner, _pcm_written, _pcm_consumed := pcm_consumed
 .endif
 .segment "MUSIC"
 .assert _rr_Zero = $CB00, lderror, "Review reclaimed reference code: first table moved"
@@ -20,41 +23,182 @@
 _music_synth: .byte 1-RIVER_PCM
 music_page: .byte 1
 .if RIVER_PCM
-probe_address: .word 0
 music_fx_read: .word 0
-fx_sample: .byte 0
+; The firmware's PCM: device (RIA 0.43+). One stream is opened on first use
+; and kept until exit: 16 kHz, 8-bit unsigned, mono. Its owner feeds it:
+; 0 none, 1 procedural effects, 2 music/jingles/intro (effects mixed in).
+_pcm_fd: .byte $ff
+_pcm_owner: .byte 0
+; 24-bit counts since the last flush: bytes written, and written minus the
+; queued level at the previous clock. Their difference paces the sequencers
+; like a DAC clock; 24 bits keep both absolute for over 17 minutes.
+_pcm_written: .res 3
+pcm_consumed: .res 3
+pcm_total: .res 3
 .endif
 mix_source: .byte 0
 mix_dest: .byte 0
 mix_slot: .byte 0
 mix_target: .byte 0
 
-; A/X = initialized PCM header. Probe the firmware, not the chosen effects.
 .if RIVER_PCM
+; The firmware buffers 8192 bytes; producers treat it as half that size.
+PCM_BUF_LIMIT = 4096
+.export PCM_BUF_LIMIT
+
+; Probe the firmware, not the chosen effects: music owns the stream.
+; _music_synth = 0 with PCM drums, 1 with synthesized OPL drums.
 music_probe:
-    sta probe_address
-    stx probe_address+1
-    stz _music_synth
-    jsr _music_pcm_probe
-    bpl @done
-    inc _music_synth
-@done:
+    lda #2
+    jsr _pcm_dev_start
+    eor #1
+    sta _music_synth
     rts
+
+; A = owner. Open the device once, empty it and hand it to the owner.
+; Returns A = 1 when PCM plays, 0 when the firmware has no PCM: device.
+_pcm_dev_start:
+    pha
+    lda _pcm_fd
+    bpl @ready
+    jsr _music_pcm_probe
+    cpx #0
+    bne @fail
+    sta _pcm_fd
+@ready:
+    jsr pcm_dev_flush
+    pla
+    sta _pcm_owner
+    lda #1
+    ldx #0
+    rts
+@fail:
+    pla
+    lda #0
+    tax
+    rts
+
 ; Kept as a separate call so emulator fixtures can model old firmware's -1.
 _music_pcm_probe:
-    lda #0
+    ldy #pcm_path_end-pcm_path-1
+@push:
+    ; Strings go on XSTACK reversed, including their terminating zero.
+    lda pcm_path,y
     sta RIA_XSTACK
-    lda #1
-    sta RIA_XSTACK
-    lda #2
-    sta RIA_XSTACK
-    lda probe_address+1
-    sta RIA_XSTACK
-    lda probe_address
-    sta RIA_XSTACK
-    lda #RIA_OP_XREG
+    dey
+    bpl @push
+    lda #2                  ; O_WRONLY
+    sta RIA_A
+    stz RIA_X
+    lda #RIA_OP_OPEN
     sta RIA_OP
     jmp RIA_SPIN
+pcm_path: .asciiz "PCM:16000,8,1"
+pcm_path_end:
+
+; Drop everything queued and restart the sample count. No owner remains.
+pcm_dev_flush:
+    stz _pcm_owner
+    ldx #2
+@clear:
+    stz _pcm_written,x
+    stz pcm_consumed,x
+    dex
+    bpl @clear
+    ldx #2                  ; cc65 SEEK_SET empties the buffer
+    bra pcm_dev_seek
+; A/X = bytes still queued for playback.
+pcm_dev_level:
+    ldx #0                  ; cc65 SEEK_CUR
+pcm_dev_seek:
+    lda _pcm_fd
+    bmi @closed
+    ldy #4
+@offset:
+    stz RIA_XSTACK          ; 32-bit offset 0, the only seek it allows
+    dey
+    bne @offset
+    stx RIA_XSTACK
+    sta RIA_A
+    stz RIA_X
+    lda #RIA_OP_LSEEK
+    sta RIA_OP
+    jmp RIA_SPIN
+@closed:
+    lda #0
+    tax
+    rts
+
+; A/X = XRAM address, Y = 256-byte pages to queue. Callers keep the level
+; below PCM_BUF_LIMIT, so the device takes every byte.
+pcm_dev_write:
+    stx RIA_XSTACK
+    sta RIA_XSTACK
+    sty RIA_XSTACK
+    stz RIA_XSTACK
+    lda _pcm_fd
+    sta RIA_A
+    stz RIA_X
+    lda #RIA_OP_WRITE_XRAM
+    sta RIA_OP
+    jsr RIA_SPIN
+    cpx #$80
+    bcs @done
+    clc
+    adc _pcm_written
+    sta _pcm_written
+    txa
+    adc _pcm_written+1
+    sta _pcm_written+1
+    bcc @done
+    inc _pcm_written+2
+@done:
+    rts
+
+; A/X = bytes queued at the last clock plus every page written since. Feeders
+; call it right after pcm_dev_consumed, without another firmware call.
+pcm_dev_queued:
+    sec
+    lda _pcm_written
+    sbc pcm_consumed
+    tay
+    lda _pcm_written+1
+    sbc pcm_consumed+1
+    tax
+    tya
+    rts
+
+; A/X = samples the device has played since the previous call.
+pcm_dev_consumed:
+    jsr pcm_dev_level
+    sta pcm_total
+    stx pcm_total+1
+    sec
+    lda _pcm_written
+    sbc pcm_total
+    sta pcm_total
+    lda _pcm_written+1
+    sbc pcm_total+1
+    sta pcm_total+1
+    lda _pcm_written+2
+    sbc #0
+    sta pcm_total+2
+    sec
+    lda pcm_total
+    sbc pcm_consumed
+    pha
+    lda pcm_total+1
+    sbc pcm_consumed+1
+    pha
+    ldx #2
+@copy:
+    lda pcm_total,x
+    sta pcm_consumed,x
+    dex
+    bpl @copy
+    plx
+    pla
+    rts
 .endif
 
 music_enable:
@@ -92,31 +236,45 @@ music_fallback_load:
     jsr boot_read_xram
     jmp boot_close
 
-; Music PCM at $CA08; procedural effects keep their independent 8 kHz ring
-; at $C008. Upsample each effects sample twice, at half gain, before publish.
+; Music PCM (unsigned) at $CA08; procedural effects keep their independent
+; signed 8 kHz ring at $C008. One pass over the newly filled page scales
+; gameplay flight percussion, then adds the effects upsampled twice at half
+; gain. Adding signed effects to unsigned music modulo 256 equals the signed
+; sum plus 128, so the offset needs no extra work. One-shots own all audio.
 ; A = newly filled music ring page (0..3).
 .if RIVER_PCM
 music_mix_pcm:
-    jsr music_quieten_drums
-    ldx _audio_backend
-    cpx #3
-    jne @done
     ldx _jingle_kind
     cpx #2
     jne @done
-    ldx _ready
-    beq @mix
-    ldx _demo_splash_out
-    jeq @done
-    ldx _demo_splash_done
-    jne @done
-@mix:
-    clc
-    adc #$ca
-    sta RIA_ADDR0+1
-    lda #8
-    sta RIA_ADDR0
-    stz RIA_STEP0
+    sta mix_page
+    ; Flight percussion is quieter only during actual gameplay.
+    ldx #<flight_drum_gain
+    ldy #>flight_drum_gain
+    lda _ready
+    sta mix_effects           ; Zero: gameplay, which mixes PCM effects.
+    beq @gain
+    ldx #<identity_gain
+    ldy #>identity_gain
+    lda _demo_splash_out      ; Only the departing splash engine mixes.
+    beq :+
+    lda _demo_splash_done
+    bra :++
+:   lda #1
+:   sta mix_effects
+@gain:
+    stx @first+1
+    sty @first+2
+    stx @second+1
+    sty @second+2
+    lda _audio_backend
+    cmp #3
+    beq @fetch
+    sta mix_effects           ; OPL effects: never mix the PCM ring.
+@fetch:
+    lda mix_effects
+    bne @silent
+    ; Effects reads start at multiples of 128, so a block never wraps.
     lda music_fx_read
     clc
     adc #8
@@ -126,43 +284,23 @@ music_mix_pcm:
     sta RIA_ADDR1+1
     lda #1
     sta RIA_STEP1
-    ldy #0
-@sample:
-    tya
-    and #1
-    bne @reuse
+    ldx #0
+@effect:
     lda RIA_RW1
     cmp #$80
     ror a
-    sta fx_sample
-    lda RIA_ADDR1+1
-    cmp #$c8
-    bne @reuse
-    lda RIA_ADDR1
-    cmp #8
-    bne @reuse
-    lda #$c0
-    sta RIA_ADDR1+1
-@reuse:
-    lda RIA_RW0
-    clc
-    adc fx_sample
-    sta RIA_RW0
-    inc RIA_ADDR0
-    bne :+
-    inc RIA_ADDR0+1
-:
-    iny
-    bne @sample
+    sta mix_half,x
+    inx
+    bpl @effect
     lda music_fx_read
-    clc
-    adc #128
+    eor #128
     sta music_fx_read
+    bne :+
     lda music_fx_read+1
-    adc #0
+    inc a
     and #7
     sta music_fx_read+1
-    lda #6
+:   lda #6
     sta RIA_ADDR0
     lda #$c0
     sta RIA_ADDR0+1
@@ -172,19 +310,44 @@ music_mix_pcm:
     sta RIA_RW0
     lda music_fx_read+1
     sta RIA_RW0
+    bra @mix
+@silent:
+    lda _ready
+    bne @done                 ; Demo without splash: the page stays as read.
+    ; Gameplay with OPL effects: only the percussion gain.
+    jsr mix_ports
+@scale:
+    ldy RIA_RW0
+    lda flight_drum_gain,y
+    sta RIA_RW1
+    ldy RIA_RW0
+    lda flight_drum_gain,y
+    sta RIA_RW1
+    inx
+    bpl @scale
+    rts
+@mix:
+    jsr mix_ports
+@sample:
+    ldy RIA_RW0
+@first:
+    lda flight_drum_gain,y
+    clc
+    adc mix_half,x
+    sta RIA_RW1
+    ldy RIA_RW0
+@second:
+    lda flight_drum_gain,y
+    clc
+    adc mix_half,x
+    sta RIA_RW1
+    inx
+    bpl @sample
 @done:
     rts
-
-; Scale only flight percussion during actual gameplay, before adding effects.
-; Two auto-incrementing ports read/write the same 256-byte unpublished page.
-; Preserve A (ring page) for the effects mixer, including the OPL effects path.
-music_quieten_drums:
-    pha
-    ldx _jingle_kind
-    cpx #2
-    bne @done
-    ldx _ready
-    bne @done
+; Two ports read and write the same unpublished page; X = 0.
+mix_ports:
+    lda mix_page
     clc
     adc #$ca
     sta RIA_ADDR0+1
@@ -195,26 +358,26 @@ music_quieten_drums:
     lda #1
     sta RIA_STEP0
     sta RIA_STEP1
-    ldy #0
-@sample:
-    lda RIA_RW0
-    tax
-    lda flight_drum_gain,x
-    sta RIA_RW1
-    iny
-    bne @sample
-@done:
-    pla
+    ldx #0
     rts
+mix_page: .byte 0
+mix_effects: .byte 0
+mix_half: .res 128            ; Halved effects samples for one music page.
+
+identity_gain:
+.repeat 256, sample
+    .byte sample
+.endrepeat
 
 ; Two 15% reductions: 0.85 * 0.85 = 289/400 (72.25% of demo amplitude).
-; Signed 8-bit samples rounded to nearest, with ties away from zero.
+; Unsigned 8-bit samples around 128, rounded to nearest with ties away from
+; the midpoint.
 flight_drum_gain:
 .repeat 256, sample
-    .if sample < 128
-        .byte (sample * 289 + 200) / 400
+    .if sample >= 128
+        .byte 128 + ((sample - 128) * 289 + 200) / 400
     .else
-        .byte (256 - ((256 - sample) * 289 + 200) / 400) & $ff
+        .byte 128 - ((128 - sample) * 289 + 200) / 400
     .endif
 .endrepeat
 .endif

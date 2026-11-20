@@ -13,16 +13,9 @@ def run_splash_audio_checks(case,sym,boot,pcm_build):
                      ('legacy-opl2',[poke(sym['music_pcm_probe'],[0xa9,0xff,0xaa,0x60])],('/opl2',),False)]
     for name,prefix,args,pcm in variants:
         for presses,mode in enumerate((0,1,3)):
-            # --mute does not consume PCM in the emulator. Model firmware
-            # reads at the active ring's sample rate, as in music_checks.py.
+            # The PCM: device consumes in real time, also under --mute.
             def consume(first,count):
-                if not pcm: return [f'run {count}']
-                address,rate,size=(0xca06,16000,1024) if not mode else (0xc006,8000,2048)
-                commands=[]
-                for frame in range(first,first+count):
-                    read=(frame*rate//60)%size
-                    commands += [f'poke xram:0x{address:04x} {read&255} {read>>8}','run 1']
-                return commands
+                return [f'run {count}']
             commands=prefix+boot+['run 15']+tap*presses+sample+[
                 'press space','run 3','release space']+consume(1,8)+sample
             if pcm:

@@ -4,6 +4,7 @@ import json
 import struct
 from pathlib import Path
 from emulator_checks import poke
+from gameover_checks import follow_jingle
 
 
 def run_victory_pcm_sequence_checks(case, sym, fixture, resume, assets):
@@ -27,14 +28,10 @@ def run_victory_pcm_sequence_checks(case, sym, fixture, resume, assets):
         if number in (5,20,50):
             rewards += 1
         if number == 50:
-            commands += [kind+' 1','dump xram:0xca08 768']
-            expected.append((assets['victory.pcm'][:768],))
-            # Match the 16 kHz consumer at 60 Hz, including the final partial
-            # frame. Once the jingle ends the flight ring starts from zero.
-            for frame in range(1,(samples*60+15999)//16000+1):
-                read = min(samples,frame*16000//60)%1024
-                commands += [f'poke xram:0xca06 {read&255} {read>>8}','run 1']
-            commands += ['run 3','dump xram:0xf900 '+str(len(assets['flight-score.bin']))]
+            # The PCM: device plays the whole fanfare in real time; once the
+            # jingle ends the flight score is loaded again.
+            commands += [kind+' 1',f'run {(samples*60+15999)//16000+3}',
+                         'dump xram:0xf900 '+str(len(assets['flight-score.bin']))]
             expected.append((assets['flight-score.bin'],))
         commands += [active+' 1',kind+' 2',started+f' {int(number==50)}',
                      f'peek 0xc0 {24+8*rewards}']
@@ -42,6 +39,10 @@ def run_victory_pcm_sequence_checks(case, sym, fixture, resume, assets):
     assert len(dumps) == len(expected)
     for index,(data,choices) in enumerate(zip(dumps,expected)):
         assert data in choices, f'Bridge destruction or music data differs at dump {index}'
+
+
+# Skipped VSYNCs tolerated per full-speed bridge scenario in the PCM build.
+PCM_SKIPPED_FRAMES = 3
 
 
 def run_victory_progression_checks(case, sym, boot, image):
@@ -65,11 +66,21 @@ def run_victory_progression_checks(case, sym, boot, image):
             commands += [f'wait 0xbd {number} 1500',
                 'wait 0xa2 8 1500','release up','press down',poke(0xb5,0),
                 poke(collision,image.data[collision]),f'peek 0xbd {number}',
-                poke(0xb2,75),poke(0xf5,80),'run 6','peek 0xa2 1',
+                # The hit lands within six frames; its exact frame follows
+                # where in the frame the script's pokes land.
+                poke(0xb2,75),poke(0xf5,80),'wait 0xa2 1 6',
                 'peek 0xc0 32',active+' 1',started+f' {int(number==50)}']
             commands += [kind+(' 1' if number == 50 else ' 2')]
-        case(f'victory-natural-bridge{milestone}-progression',commands,
-             rom_args=('/pcm',) if pcm_build else ())
+        if not pcm_build:
+            case(f'victory-natural-bridge{milestone}-progression',commands)
+            continue
+        # The PCM: device plays in real time, also under --mute: 8 kHz effects
+        # and the 16 kHz percussion mix cost about a tenth of a frame. Full-
+        # speed travel through bridges can exceed the budget for a few frames.
+        _,dumps=case(f'victory-natural-bridge{milestone}-progression',
+            commands+['run 2','dump xram:0x009e 2'],gameplay=False,rom_args=('/pcm',))
+        skipped=int.from_bytes(dumps[-1],'little')
+        assert skipped<=PCM_SKIPPED_FRAMES, f'bridge {milestone}: {skipped} skipped frames'
 
 
 def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
@@ -116,33 +127,16 @@ def run_victory_checks(case, sym, fixture, resume, boot, assets, image):
     root = Path(__file__).resolve().parents[1]
     score = json.loads((root/'src/victory-score.json').read_text())
     pcm = assets['victory.pcm']
-    assert pcm == (root/'assets/victory.pcm').read_bytes()
-    assert hashlib.sha256(pcm).hexdigest() == score['pcm_sha256']
+    source = (root/'assets/victory.pcm').read_bytes()
+    assert hashlib.sha256(source).hexdigest() == score['pcm_sha256']
+    # The ROM holds the unsigned copy the PCM: device plays.
+    assert pcm == bytes(b ^ 0x80 for b in source)
     assert score['bpm']==96 and score['samples']==len(pcm)==186368
-    # Two display frames per page make this clock test longer than real audio;
-    # fill the tank so the flight survives the entire verification timeline.
-    commands = base+bridge(50)+[poke(0xb7,[255,255])]+resume+['dump xram:0xca08 768']
-    for page in range(1,len(pcm)//256):
-        commands += [f'poke xram:0xca06 0 {page%4}','run 2','dump xram:0xc900 256']
-        if page+2<len(pcm)//256:
-            commands += [f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
-    commands += [f'poke xram:0xca06 0 {(len(pcm)//256)%4}','run 3',active+' 1',kind+' 2',
-                 started+' 1','peek 0xc0 32']
-    _,data = case('victory-complete-score-and-pcm',commands)
-    assert data.pop(0)==pcm[:768]
-    expected=bytearray(256)
-    index=end=0
-    for page in range(1,len(pcm)//256):
-        while page*256>=end:
-            record=score['records'][index]
-            for reg,value in record['writes']:
-                expected[reg]=value
-            end+=record['samples']
-            index+=1
-        assert data.pop(0)==expected, f'OPL differs at page {page}'
-        if page+2<len(pcm)//256:
-            assert data.pop(0)==pcm[(page+2)*256:(page+3)*256], f'PCM differs at page {page}'
-    assert not data
+    # Fill the tank so the flight survives the entire fanfare.
+    follow_jingle(case, sym, 'victory-complete-score-and-pcm',
+                  base+bridge(50)+[poke(0xb7,[255,255])]+resume, pcm, score['records'])
+    case('victory-complete-returns-to-flight', base+bridge(50)+[poke(0xb7,[255,255])]+resume+[
+        f'run {len(pcm)*60//16000+20}', active+' 1', kind+' 2', started+' 1', 'peek 0xc0 32'])
 
     # Game-over must replace a running fanfare if the awarded plane is lost.
     case('victory-final-death-priority',base+bridge(50)+resume+[

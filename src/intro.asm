@@ -7,6 +7,7 @@
 .import music_enable, music_page
 .if RIVER_PCM
 .import music_probe, music_fallback_load, _music_synth
+.import pcm_dev_queued, pcm_dev_write, pcm_dev_consumed, pcm_dev_flush, PCM_BUF_LIMIT
 .endif
 .export intro_levels, intro_gain
 .import _sprites, _tanks, __INTRO_SCORE_SIZE__
@@ -90,8 +91,11 @@ intro_stop:
 
 .segment "INTRO_PLAYER"
 .assert _sprites+1024 <= _tanks, lderror, "Intro player overwrites persistent tank state"
-INTRO_PCM = $09F8
-INTRO_RING = $0A00
+INTRO_RING = $0A00           ; Four staging pages queued to the PCM: device.
+.if RIVER_PCM
+.assert INTRO_RATE = 16000, error, "The PCM: device stream is opened at 16 kHz"
+.assert 4*256 <= PCM_BUF_LIMIT, lderror, "Intro queue exceeds the PCM buffer budget"
+.endif
 
 player_init:
     lda #<INTRO_OPL
@@ -105,19 +109,6 @@ player_init:
     iny
     bne @clear
 .if RIVER_PCM
-    lda #<INTRO_PCM
-    sta RIA_ADDR0
-    lda #>INTRO_PCM
-    sta RIA_ADDR0+1
-    ldy #0
-@header:
-    lda drum_header,y
-    sta RIA_RW0
-    iny
-    cpy #8
-    bne @header
-    lda #<INTRO_PCM
-    ldx #>INTRO_PCM
     jsr music_probe
 .endif
     lda #>INTRO_OPL
@@ -153,34 +144,10 @@ player_tick:
 .if RIVER_PCM
     lda drum_enabled
     beq @fallback
-    lda #0
-    sta RIA_STEP1
-    lda #>INTRO_PCM
-    sta RIA_ADDR1+1
-@read:
-    lda #<(INTRO_PCM+7)
-    sta RIA_ADDR1
-    lda RIA_RW1
-    sta drum_read+1
-    dec RIA_ADDR1
-    lda RIA_RW1
-    sta drum_read
-    inc RIA_ADDR1
-    lda RIA_RW1
-    cmp drum_read+1
-    bne @read
-    sec
-    lda drum_read
-    sbc drum_previous
+    ; Samples the device played since the last frame clock the sequencer.
+    jsr pcm_dev_consumed
     sta intro_delta
-    lda drum_read+1
-    sbc drum_previous+1
-    and #3
-    sta intro_delta+1
-    lda drum_read
-    sta drum_previous
-    lda drum_read+1
-    sta drum_previous+1
+    stx intro_delta+1
     jsr drum_fill
     bra @advance
 @fallback:
@@ -312,7 +279,7 @@ player_stop:
 .if RIVER_PCM
     lda drum_enabled
     beq @close
-    xreg 0,1,2,$ffff
+    jsr pcm_dev_flush
 @close:
     jsr drum_enter
     jsr boot_close
@@ -356,11 +323,8 @@ drum_open:
 drum_fill:
     jsr drum_enter
 @next:
-    lda drum_write
-    sec
-    sbc drum_read+1
-    and #3
-    cmp #3
+    jsr pcm_dev_queued        ; Keep three pages queued ahead of playback.
+    cpx #3
     bcs @done
     lda drum_pages
     ora drum_pages+1
@@ -368,7 +332,7 @@ drum_fill:
     jsr boot_close
     jsr drum_open
 @copy:
-    ; READ_XRAM(address,256) writes a complete page before publishing it.
+    ; READ_XRAM(address,256) fills a complete page before it is queued.
     lda drum_write
     clc
     adc #>INTRO_RING
@@ -382,6 +346,13 @@ drum_fill:
     ldx #1
     jsr boot_read_xram
     jsr drum_fade
+    lda drum_write
+    clc
+    adc #>INTRO_RING
+    tax
+    lda #<INTRO_RING
+    ldy #1
+    jsr pcm_dev_write
     lda drum_pages
     bne @decrement
     dec drum_pages+1
@@ -391,12 +362,6 @@ drum_fill:
     lda drum_write
     and #3
     sta drum_write
-    lda #<(INTRO_PCM+1)
-    sta RIA_ADDR0
-    lda #>INTRO_PCM
-    sta RIA_ADDR0+1
-    lda drum_write
-    sta RIA_RW0
     bra @next
 @done:
     jmp drum_leave
@@ -412,15 +377,15 @@ intro_low: .byte 0
 intro_high: .byte 0
 
 .if RIVER_PCM
-drum_header: .byte 0,0,3,10,<INTRO_RATE,>INTRO_RATE,0,0
 drum_path: .asciiz "ROM:intro-drums.pcm"
 drum_enabled: .byte 0
 drum_fd: .word $ffff
 drum_saved: .word 0
 drum_pages: .word 0
-drum_read: .word 0
-drum_previous: .word 0
 drum_write: .byte 0
+; Reloaded with the player, so a stale table is never trusted.
+fade_table_gain: .byte $ff
+fade_table: .res 256
 .endif
 intro_phase: .word 0
 intro_delta: .word 0
@@ -429,7 +394,7 @@ fallback_fraction: .byte 3
 .segment "INTRO"
 ; Fade both manual exits and the outro; cover -> initial manual keeps playing.
 ; OPL carrier attenuation follows each of the
-; 64 fade levels; PCM pages are scaled before they are published to PIX.
+; 64 fade levels; PCM pages are scaled before they are queued.
 intro_fade:
     lda boot_scene
     beq @done
@@ -474,6 +439,36 @@ drum_fade:
     sta fade_pcm_gain
     cmp #63
     beq @done
+    cmp fade_table_gain
+    beq @scale
+    ; Rebuild the unsigned gain table once per fade level. Accumulate
+    ; (u-128)*4*gain from u=0: its high byte is floor((u-128)*gain/64),
+    ; exactly the former per-sample multiply, at a fraction of its cost.
+    sta fade_table_gain
+    asl a
+    asl a
+    sta fade_step
+    lda intro_gain
+    asl a
+    eor #$ff
+    inc a
+    sta fade_acc+1            ; -512*gain
+    stz fade_acc
+    ldx #0
+@table:
+    lda fade_acc+1
+    eor #$80
+    sta fade_table,x
+    clc
+    lda fade_acc
+    adc fade_step
+    sta fade_acc
+    bcc :+
+    inc fade_acc+1
+:
+    inx
+    bne @table
+@scale:
     lda drum_write
     clc
     adc #>INTRO_RING
@@ -486,50 +481,16 @@ drum_fade:
     sta RIA_STEP1
     ldy #0
 @sample:
-    lda RIA_RW0
-    sta fade_value
-    lda #0
-    bit fade_value
-    bpl @positive
-    dec a
-@positive:
-    sta fade_value+1
-    stz fade_product
-    stz fade_product+1
-    lda intro_gain
-    sta fade_factor
-    ldx #6
-@multiply:
-    lsr fade_factor
-    bcc @shift
-    clc
-    lda fade_product
-    adc fade_value
-    sta fade_product
-    lda fade_product+1
-    adc fade_value+1
-    sta fade_product+1
-@shift:
-    asl fade_value
-    rol fade_value+1
-    dex
-    bne @multiply
-    ldx #6
-@divide:
-    lsr fade_product+1
-    ror fade_product
-    dex
-    bne @divide
-    lda fade_product
+    ldx RIA_RW0
+    lda fade_table,x
     sta RIA_RW1
     iny
     bne @sample
 @done:
     rts
 fade_pcm_gain: .byte 63
-fade_factor: .byte 0
-fade_value: .word 0
-fade_product: .word 0
+fade_step: .byte 0
+fade_acc: .word 0
 .endif
 
 .segment "INTRO_SCORE"

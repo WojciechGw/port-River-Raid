@@ -84,11 +84,9 @@ def run_splash_scene_checks(case,sym,boot,fixture,resume,assets,pcm_build,output
                 f'peek {phase} 0',f'wait {phase} 1 60','run 3',f'peek {phase} 1',f'peek {kind} 0']+frame
             commands+=arrived+[f'peek {phase} 2']+frame
             if pcm_build and not muted:
-                # An unconsumed PCM score must keep GAME OVER visible even
-                # after the native world has resumed demo and 6.7s passed.
-                commands+=['run 450',f'peek {phase} 2',f'peek {kind} 2']
-                for page in range(1,420):
-                    commands += [f'poke xram:0xca06 0 {page%4}','run 2']
+                # The PCM score (6.7 s, clocked by the device) keeps GAME OVER
+                # visible while the native world has already resumed demo.
+                commands+=['run 300',f'peek {phase} 2']
             commands += [f'wait {phase} 3 500',f'peek {kind} 2','run 3']+frame
             commands += [f'wait {phase} 0 60','run 3',f'peek {kind} 0']+frame+[
                 f'wait {kind} 1 90','run 2']+frame
@@ -102,18 +100,24 @@ def run_splash_scene_checks(case,sym,boot,fixture,resume,assets,pcm_build,output
             verify(data[16:20],'areyouready')
 
     if pcm_build:
-        # --mute does not consume PCM. Advance the hardware read pointer to
-        # verify the stream continues at the right file offset across swaps.
+        # Verify the stream continues at the right file offset across swaps:
+        # every page queued to the PCM: device since the tune's start.
+        from pcm_stream import Stream, snapshot
         for scene,start,samples in (
                 ('demo',boot+['run 15','press space','run 3','release space'],assets['flight-drums.pcm']),
                 ('gameover',fixture+last+resume+[f'wait {phase} 1 60','run 3'],assets['gameover.pcm'])):
-            commands=start
-            for page in range(1,8):
-                commands += [f'poke xram:0xca06 0 {page%4}','run 2',
-                    f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
+            commands=start[:]
+            for _ in range(16):
+                commands += snapshot(sym,0xca08)+['run 1']
             # OPL effects keep the demo's PCM drums unmixed, so every byte
             # can be compared to the ROM while the plane engine still runs.
             _,data=case(f'splash-preserves-pcm-file-{scene}',commands,
                         rom_args=('/opl2' if scene=='demo' else '/pcm',))
-            for page,chunk in enumerate(data,3):
-                assert chunk==samples[page*256:(page+1)*256], 'Splash changed the PCM file cursor'
+            stream=Stream()
+            for written,consumed,ring in zip(*[iter(data[-48:])]*3):
+                assert stream.add(written,consumed,ring), 'Splash restarted the PCM stream'
+            pages=stream.contiguous()
+            assert len(pages)>=12, 'Splash stopped the PCM stream'
+            for page in pages:
+                offset=(page*256)%len(samples)
+                assert stream.pages[page]==samples[offset:offset+256], 'Splash changed the PCM file cursor'
