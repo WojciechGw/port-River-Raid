@@ -1,7 +1,7 @@
 # River Raid for Picocomputer 6502
 
 <!-- rp6502
-preset: cc65/Release
+preset: cc65/Release-PCM
 publish: riverraid.zip
 -->
 [![Play River Raid](https://wojciechgw.github.io/port-River-Raid/riverraid/screenshot.png)](https://wojciechgw.github.io/port-River-Raid/riverraid/)
