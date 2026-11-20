@@ -97,6 +97,7 @@ music_fallback_load:
 ; A = newly filled music ring page (0..3).
 .if RIVER_PCM
 music_mix_pcm:
+    jsr music_quieten_drums
     ldx _audio_backend
     cpx #3
     jne @done
@@ -173,6 +174,49 @@ music_mix_pcm:
     sta RIA_RW0
 @done:
     rts
+
+; Scale only flight percussion during actual gameplay, before adding effects.
+; Two auto-incrementing ports read/write the same 256-byte unpublished page.
+; Preserve A (ring page) for the effects mixer, including the OPL effects path.
+music_quieten_drums:
+    pha
+    ldx _jingle_kind
+    cpx #2
+    bne @done
+    ldx _ready
+    bne @done
+    clc
+    adc #$ca
+    sta RIA_ADDR0+1
+    sta RIA_ADDR1+1
+    lda #8
+    sta RIA_ADDR0
+    sta RIA_ADDR1
+    lda #1
+    sta RIA_STEP0
+    sta RIA_STEP1
+    ldy #0
+@sample:
+    lda RIA_RW0
+    tax
+    lda flight_drum_gain,x
+    sta RIA_RW1
+    iny
+    bne @sample
+@done:
+    pla
+    rts
+
+; Two 15% reductions: 0.85 * 0.85 = 289/400 (72.25% of demo amplitude).
+; Signed 8-bit samples rounded to nearest, with ties away from zero.
+flight_drum_gain:
+.repeat 256, sample
+    .if sample < 128
+        .byte (sample * 289 + 200) / 400
+    .else
+        .byte (256 - ((256 - sample) * 289 + 200) / 400) & $ff
+    .endif
+.endrepeat
 .endif
 
 ; Effects run normally into their original mirrors. Merge only the voices
@@ -210,7 +254,6 @@ _music_effects:
     jsr opl_copy_voice
     bra @tones
 @compact:
-.endif
     ldx #0
     lda #$b4
     sta RIA_ADDR1
@@ -226,6 +269,23 @@ _music_effects:
     ldx #7
     ldy #7
     jsr opl_copy_voice
+.else
+    ; Six music voices leave three for effects. Keep the engine on 6;
+    ; blasts borrow the player-shot voice on 7, never the engine's patch.
+    ldx #0
+    ldy #6
+    jsr opl_copy_voice
+    ldx #7
+    lda #$b4
+    sta RIA_ADDR1
+    lda RIA_RW1
+    and #32
+    beq :+
+    ldx #4
+:
+    ldy #7
+    jsr opl_copy_voice
+.endif
     ldx #8
     ldy #8
     jsr opl_copy_voice

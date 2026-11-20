@@ -7,6 +7,8 @@ from emulator_checks import poke
 
 
 def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
+    from gameover_delay_checks import run_gameover_delay_checks
+    run_gameover_delay_checks(case,sym,fixture,resume,True)
     root = Path(__file__).resolve().parents[1]
     score = json.loads((root/'src/gameover-score.json').read_text())
     pcm = (root/'assets/gameover.pcm').read_bytes()
@@ -16,9 +18,10 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
     active = f'peek 0x{sym["gameover_active"]:04x}'
     started = f'peek 0x{sym["gameover_started"]:04x}'
     kind = f'peek 0x{sym["jingle_kind"]:04x}'
+    begin = [f'wait 0x{sym["demo_splash_gameover_phase"]:04x} 1 60','run 2']
     last = [poke(0xc0,sym['rr_Copyright0']&255), poke(0xb3,4)]
     for backend in ('opl2','pcm'):
-        case(f'gameover-final-plane-{backend}',fixture+last+resume+[
+        case(f'gameover-final-plane-{backend}',fixture+last+resume+begin+[
             active+' 1',started+' 1','run 20',active+' 1',started+' 1'],
             rom_args=('/'+backend,))
     case('gameover-ordinary-loss',fixture+[poke(0xb3,4)]+resume+[
@@ -31,12 +34,12 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
                 poke(0x80,1),poke(0xf4,pilot),poke(0xc5,lives)]+last+resume+[
                     active+' 1',kind+' 2',started+' 0','run 100',active+' 1',kind+' 2',started+' 0'])
         case(f'gameover-game2-last-p{pilot+1}',fixture+[poke(0x80,1),poke(0xf4,pilot),
-            poke(0xc5,sym['rr_Copyright0']&255)]+last+resume+[active+' 1',started+' 1',
+            poke(0xc5,sym['rr_Copyright0']&255)]+last+resume+begin+[active+' 1',started+' 1',
                 'run 100',active+' 1',started+' 1'])
 
     # Drive the hardware sample clock; --mute does not consume the PCM ring.
     # This checks each streamed page, variable note lengths and the final tail.
-    commands = fixture+last+resume+['dump xram:0xca08 768']
+    commands = fixture+last+resume+begin+['dump xram:0xca08 768']
     for page in range(1,len(pcm)//256):
         # Let the gameplay render/audio phase finish before sampling a newly
         # published page; a single VSYNC can stop before that frame's refill.
@@ -65,11 +68,11 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
 
     for name, action in (('mute',['press f9']),('pause',['press p']),('restart',['press r']),
                          ('backend',['press f10']),('mode',['press f2'])):
-        case(f'gameover-cancel-{name}',fixture+last+resume+[active+' 1']+action+[
+        case(f'gameover-cancel-{name}',fixture+last+resume+begin+[active+' 1']+action+[
             'run 3',action[0].replace('press ','release '),'run 4',
             active+(' 0' if name in ('mute','pause') else ' 1')]+([kind+' 2'] if name not in ('mute','pause') else []))
 
-    case('gameover-cancel-help',fixture+last+resume+[active+' 1','press f1',
+    case('gameover-cancel-help',fixture+last+resume+begin+[active+' 1','press f1',
         'wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5',
         active+' 0','press space','run 3',
         'release space','wait xram:0x0080 82 320','run 3',active+' 1',kind+' 2'])
@@ -95,9 +98,9 @@ def run_gameover_checks(case, sym, fixture, resume, boot, build, assets):
         case(f'gameover-duo-survivor-p{pilot+1}',duo+[poke(base+4,[0,0])]+resume+[
             active+' 1',kind+' 2',started+' 0'])
         case(f'gameover-duo-last-p{pilot+1}',duo+[
-            poke(other+8,0),poke(other+19,[0,0]),poke(base+4,[0,0])]+resume+[
+            poke(other+8,0),poke(other+19,[0,0]),poke(base+4,[0,0])]+resume+begin+[
             active+' 1',started+' 1','run 40',active+' 1',started+' 1'])
     case('gameover-duo-simultaneous',duo+[
-        poke(players+4,[0,0]),poke(players+27,[0,0])]+resume+[active+' 1',started+' 1'])
+        poke(players+4,[0,0]),poke(players+27,[0,0])]+resume+begin+[active+' 1',started+' 1'])
     case('gameover-duo-reserves-remain',duo+[poke(players+8,16),poke(players+31,16),
         poke(players+4,[0,0]),poke(players+27,[0,0])]+resume+[active+' 1',kind+' 2',started+' 0'])

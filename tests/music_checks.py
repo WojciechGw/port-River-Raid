@@ -2,6 +2,15 @@
 from emulator_checks import poke
 
 
+def gameplay_drums(data):
+    result=[]
+    for value in data:
+        signed=value if value<128 else value-256
+        magnitude=(abs(signed)*289+200)//400
+        result.append((magnitude if signed>=0 else -magnitude)&255)
+    return bytes(result)
+
+
 def check_opl_crash(case,sym,fixture,resume,name,channel=6):
     # Cause a real bank collision with spare lives, leaving the flight tune
     # running. Check the audible music mirror, not just the effects producer.
@@ -75,12 +84,13 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
                 for ch in range(3)]+['expect-exit 0 5'],gameplay=False,rom_args=('/'+backend,))
         case(f'music-gameover-no-pcm-{backend}',legacy+fixture+[
             poke(0xc0,sym['rr_Copyright0']&255),poke(0xb3,4)]+resume+[
+                f'wait 0x{sym["demo_splash_gameover_phase"]:04x} 1 60','run 2',
                 synth+f' {mode}',active+' 1',kind+' 0','run 450',active+' 1',kind+' 2'],
                 rom_args=('/'+backend,))
         case(f'music-victory-no-pcm-{backend}',legacy+fixture+[
             poke(sym['tanks'],[0]*30),poke(0xa2,8),poke(0x96,4),poke(0x9c,0x37),
             poke(0xb5,0),'press down',poke(0xb2,75),poke(0xf5,80),
-            poke(0xbd,5),poke(0x90,128)]+resume+[
+            poke(0xbd,50),poke(0x90,128)]+resume+[
                 synth+f' {mode}',active+' 1',kind+' 1','peek 0xc0 32'],rom_args=('/'+backend,))
 
     for backend in ('opl2','pcm'):
@@ -101,6 +111,20 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
         queued=(int.from_bytes(dumps[5],'little')-consumed)%1024
         assert 256<queued<=768, 'Flight percussion buffer underrun'
 
+    # OPL effects leave the percussion stream isolated. Compare real published
+    # pages in demo/gameplay, including both signs and repeated ring wraps.
+    drums=assets['flight-drums.pcm']
+    for scene,setup in (('demo',boot),('gameplay',fixture+resume)):
+        commands=setup+[synth+' 0',active+' 1',kind+' 2']
+        for page in range(1,21):
+            commands += [f'poke xram:0xca06 0 {page%4}','run 2',
+                f'dump xram:0x{0xca08+((page+2)%4)*256:04x} 256']
+        _,dumps=case(f'music-percussion-gain-{scene}',commands,rom_args=('/opl2',))
+        for page,chunk in enumerate(dumps,1):
+            source=drums[(page+2)*256:(page+3)*256]
+            expected=gameplay_drums(source) if scene=='gameplay' else source
+            assert chunk==expected, f'{scene} percussion page {page}'
+
     # Known signed effects samples isolate the actual on-CPU mix/upsampling
     # from the procedural synthesizer. Cross both ring wrap boundaries.
     drums=assets['flight-drums.pcm']
@@ -115,5 +139,5 @@ def run_music_checks(case,sym,boot,fixture,resume,build,assets,image):
         for page in range(1,21):
             chunk,read=dumps[(page-1)*2:page*2]
             source=drums[(page+2)*256:(page+3)*256]
-            assert chunk==bytes((value+sample//2)&255 for value in source), f'PCM mix page {page}'
+            assert chunk==bytes((value+sample//2)&255 for value in gameplay_drums(source)), f'PCM mix page {page}'
             assert int.from_bytes(read,'little')==(384+page*128)%2048

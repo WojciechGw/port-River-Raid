@@ -4,7 +4,7 @@
 def run_start_checks(case,sym,boot):
     for variant in range(3):
         select=boot+['press f2','run 3','release f2','run 8']*variant
-        for key in ('space','enter','0xe0','r','f3','pad-fire','pad-select','short-space'):
+        for key in ('space','enter','0xe0','r','pad-fire','pad-select','short-space'):
             pad=key.startswith('pad-')
             short=key=='short-space'
             button='b' if key=='pad-fire' else 'select' if pad else 'space' if short else key

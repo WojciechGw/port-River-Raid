@@ -4,7 +4,6 @@ from emulator_checks import poke
 
 
 def run_opl_only_checks(case,sym,boot,fixture,resume,start,build,assets):
-    from music_checks import check_opl_crash
     from help_checks import run_help_fade_checks
     forbidden={'pcm_feed','pcm_reset','pcm_enabled','music_pcm_probe','audio_next','intro_pcm_gain'}
     assert not forbidden.intersection(sym), 'PCM/switching code remains linked'
@@ -23,15 +22,29 @@ def run_opl_only_checks(case,sym,boot,fixture,resume,start,build,assets):
     run_demo_splash_checks(case,sym,boot,build/'checks',assets)
     from splash_scene_checks import run_splash_scene_checks
     run_splash_scene_checks(case,sym,boot,fixture,resume,assets,False,build/'checks')
-    check_opl_crash(case,sym,fixture,resume,'opl-only-plane-crash')
+    from opl_engine_checks import run_opl_engine_checks
+    run_opl_engine_checks(case,sym,fixture,resume)
+    from outro_audio_checks import run_outro_audio_checks
+    run_outro_audio_checks(case,sym,fixture,resume)
     from enemy_audio_checks import run_enemy_audio_checks
     run_enemy_audio_checks(case,sym,fixture,resume,'opl-only')
     from start_checks import run_start_checks
     run_start_checks(case,sym,boot)
+    from bridge_selection_checks import run_bridge_selection_checks
+    run_bridge_selection_checks(case,sym,boot,fixture,resume)
     from splash_audio_checks import run_splash_audio_checks
     run_splash_audio_checks(case,sym,boot,False)
     from sound_mode_checks import run_sound_mode_checks
     run_sound_mode_checks(case,sym,boot,fixture,resume,False)
+    from victory_checks import run_victory_progression_checks
+    from rp6502 import ROM
+    image=ROM()
+    image.add_rom_file(str(build/'riverraid.rp6502'))
+    run_victory_progression_checks(case,sym,boot,image)
+    from opl_tuning_checks import run_opl_tuning_checks
+    run_opl_tuning_checks(case,sym,fixture,resume,build/'checks')
+    from gameover_delay_checks import run_gameover_delay_checks
+    run_gameover_delay_checks(case,sym,fixture,resume,False)
 
     active=f'peek 0x{sym["gameover_active"]:04x}'
     kind=f'peek 0x{sym["jingle_kind"]:04x}'
@@ -106,11 +119,12 @@ def run_opl_only_checks(case,sym,boot,fixture,resume,start,build,assets):
 
     case('opl-only-gameover',fixture+[
         poke(0xc0,sym['rr_Copyright0']&255),poke(0xb3,4)]+resume+[
+        f'wait 0x{sym["demo_splash_gameover_phase"]:04x} 1 60','run 2',
         active+' 1',kind+' 0']+tap+[active+' 1',kind+' 0','run 450',active+' 1',kind+' 2'])
     case('opl-only-victory',fixture+[
         poke(sym['tanks'],[0]*30),poke(0xa2,8),poke(0x96,4),poke(0x9c,0x37),
         poke(0xb5,0),'press down',poke(0xb2,75),poke(0xf5,80),
-        poke(0xbd,5),poke(0x90,128)]+resume+[
+        poke(0xbd,50),poke(0x90,128)]+resume+[
         active+' 1',kind+' 1','peek 0xc0 32']+tap+[active+' 1',kind+' 1'])
     case('opl-only-frame-budget',start+[
         'press up space','run 1200','release up space','run 2',backend,synth])

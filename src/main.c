@@ -176,6 +176,7 @@ uint8_t road_gunner=255;
 static const uint16_t tank_images[3]={XRAM_TANK_IMAGE,XRAM_TANK_IMAGE_ALT,XRAM_TANK_IMAGE_ALT2};
 /* Applied by native GameInit to both players on a full game reset. */
 uint8_t start_level=1;
+static const uint8_t start_bridges[]={1,5,10,15,20,25,30,35,40,45,49};
 static uint8_t state_bytes[32], old_score[12], old_fuel;
 uint8_t palette_player;
 static uint16_t ticks, skipped_frames, jet_cache=0xffff;
@@ -1251,7 +1252,8 @@ static void hud_details(void)
     demo_footer_tick();
     /* Attract mode uses Space in the native life pointer. Preview the
      * starting reserves, just as the GAME 3 selection HUD does. */
-    level=G(0xbd); reserves=ready ? 3 : G(0xc0)<80 ? G(0xc0)/8 : 0; dirty=high_dirty;
+    level=ready ? start_level : G(0xbd);
+    reserves=ready ? 3 : G(0xc0)<80 ? G(0xc0)/8 : 0; dirty=high_dirty;
     if (shown_level!=level || shown_variant!=VAR) {
         /* Digit images are prepared once. Three sprites avoid rasterizing
          * extra numbers during the same frame as a reset and palette change. */
@@ -1521,7 +1523,7 @@ static void hud_layout(void)
 #pragma code-name(pop)
 static void duo_hud(void)
 {
-    static uint8_t n,i,y,x,fuel,fill,fuel_drawn;
+    static uint8_t n,i,y,x,fuel,fill,fuel_drawn,level;
     fuel_drawn=0;
     for (n=0;n<2;++n) {
         duo_p=duo_players+n;
@@ -1544,9 +1546,10 @@ static void duo_hud(void)
             }
         }
     }
-    hud_sprites[15].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)/10)*32;
-    hud_sprites[15].y=G(0xbd)>=10 ? HUD_TOP+DUO_STAGE_Y : -256;
-    hud_sprites[16].image=XRAM_SCORE_DIGITS+(uint16_t)(G(0xbd)%10)*32;
+    level=ready ? start_level : G(0xbd);
+    hud_sprites[15].image=XRAM_SCORE_DIGITS+(uint16_t)(level/10)*32;
+    hud_sprites[15].y=level>=10 ? HUD_TOP+DUO_STAGE_Y : -256;
+    hud_sprites[16].image=XRAM_SCORE_DIGITS+(uint16_t)(level%10)*32;
     demo_footer_tick();
     upload(XRAM_HUD_SPRITES,hud_sprites,sizeof(hud_sprites)); hud_dirty=0;
 }
@@ -1743,7 +1746,10 @@ int main(int argc,char** argv)
         changes=controls&~previous_keys;
         switches^=(changes&25)<<3; /* F4 palette, F5/F8 missile guidance. */
         if (changes&4) {
-            start_level=start_level==1 ? 5 : start_level==5 ? 20 : start_level==20 ? 50 : 1;
+            for (y=0;y<sizeof(start_bridges);++y)
+                if (start_bridges[y]==start_level) break;
+            ++y;
+            start_level=start_bridges[y<sizeof(start_bridges) ? y : 0];
         }
         if (changes&32) sound_status_f9();
 #if RIVER_PCM
@@ -1758,8 +1764,7 @@ int main(int argc,char** argv)
         if ((input&PAUSE) && !(previous_input&PAUSE)) paused^=1;
         G(0x282)=switches; if (controls&2) G(0x282)&=~2;
         if (changes&2) {demo_splash_cancel(); game_start_pending=0;} /* F2 cancels the overlay sequence. */
-        if ((changes&4) ||
-            ((input&START) && !(previous_input&START)) ||
+        if (((input&START) && !(previous_input&START)) ||
             ((ready || MODE==255) && (input&FIRE) && !(previous_input&FIRE))) {
             paused=0;
             game_start_pending=1;

@@ -184,7 +184,8 @@ def run_help_checks(case, sym, boot, output):
         stage=boot+["press f4", "run 3", "release f4", "run 3"]+[
                     cmd for _ in range(presses) for cmd in
                     ("press f3", "run 3", "release f3", "run 3")]
-        _,buffers=case(f"help-later-stage-{presses}",stage+["run 170"]+pause+
+        _,buffers=case(f"help-later-stage-{presses}",stage+[
+            "press space","run 136","release space","run 34"]+pause+
             snapshot+["mark"]+
             opening+closing+["expect-same"]+snapshot)
         assert buffers[0]==buffers[7] and buffers[3:7]==buffers[10:14]

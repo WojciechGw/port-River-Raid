@@ -97,9 +97,15 @@ static uint16_t engine_pitch(uint8_t band)
     /* Keep four independent phase clocks and the full speed accumulator.
      * Strong feedback supplies broadband noise, rather than audible FM notes.
      * Keep the RNG calls unchanged: blast voices share this sequence.
-     * Max product is 44*255, within cc65's 16-bit arithmetic. */
+     * Max product is 44*606, within cc65's 16-bit arithmetic. */
     uint16_t hz=8+band*7+(noise8()>>4);
+#if !RIVER_PCM
+    /* Broaden the noise-clock range with throttle, without pitched notes,
+     * AM/vibrato or retriggering the continuously running noise operators. */
+    return (hz*((uint16_t)G(0xb5)*2+96))>>7;
+#else
     return hz+((hz*G(0xb5))>>7);
+#endif
 }
 static uint16_t tone_hz(uint16_t step)
 {
@@ -187,7 +193,8 @@ static void opl_update(uint8_t flight,uint8_t native_engine)
     volume=flight ? engine_volume[G(0x84)&3] : 0;
     for (n=0;n<4;++n) {
         hz=flight ? engine_pitch(n) : 0;
-        opl_voice(n,hz,volume,3);
+        /* Two additional 0.75 dB steps give 84.1% amplitude (about -15%). */
+        opl_voice(n,hz,volume,RIVER_PCM ? 3 : 5);
     }
     blast=(!native_engine && !pcm_tone[0]) ? pcm_amplitude[0]>>1 : 0;
     bridge=!pcm_tone[1] ? pcm_amplitude[1]>>1 : 0;

@@ -124,7 +124,7 @@ def generate(source):
     for name in sorted(definitions - live_labels):
         relocate = "-$3000" if name in rom_labels else ""
         if name == "MAX_LEVEL":
-            out.append("MAX_LEVEL = 50 ; Allow F3 to select bridge 50; reference stays exact.")
+            out.append("MAX_LEVEL = 50 ; Bridge 50 follows selectable bridge 49; reference stays exact.")
         else:
             out.append(f"{name} = reference::{name}{relocate}")
     out += ['; Native reset cannot clear cc65 ZP or change the caller stack.',

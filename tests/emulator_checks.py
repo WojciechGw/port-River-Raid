@@ -455,7 +455,14 @@ def main():
     parser.add_argument("--music-only",action="store_true")
     parser.add_argument("--opl-only",action="store_true",help="Check a RIVER_PCM=OFF build")
     parser.add_argument("--gameover-only",action="store_true")
+    parser.add_argument("--gameover-delay-only",action="store_true")
     parser.add_argument("--victory-only",action="store_true")
+    parser.add_argument("--opl-tuning-only",action="store_true")
+    parser.add_argument("--opl-engine-only",action="store_true")
+    parser.add_argument("--outro-audio-only",action="store_true")
+    parser.add_argument("--bridge-selection-only",action="store_true")
+    parser.add_argument("--bridge-milestones-only",action="store_true",
+                        help="Check natural bridge progression and fanfare milestones on OPL2 or PCM")
     parser.add_argument("--audio-switch-only",action="store_true")
     parser.add_argument("--duo-only",action="store_true")
     parser.add_argument("--screens-only",action="store_true")
@@ -530,6 +537,44 @@ def main():
 
     pcm_build = 'intro-drums.pcm' in dict(load_image.assets)
     selected_suite = any(value for name,value in vars(args).items() if name.endswith('_only'))
+    if args.outro_audio_only:
+        if pcm_build:
+            parser.error('Use the OPL2-only build for --outro-audio-only')
+        from outro_audio_checks import run_outro_audio_checks
+        run_outro_audio_checks(case,sym,fixture,resume)
+        print(f"All {count} outro audio checks passed.",flush=True)
+        return
+    if args.opl_engine_only:
+        if pcm_build:
+            parser.error('Use the OPL2-only build for --opl-engine-only')
+        from opl_engine_checks import run_opl_engine_checks
+        run_opl_engine_checks(case,sym,fixture,resume)
+        print(f"All {count} OPL engine continuity checks passed.",flush=True)
+        return
+    if args.gameover_delay_only:
+        from gameover_delay_checks import run_gameover_delay_checks
+        run_gameover_delay_checks(case,sym,fixture,resume,pcm_build)
+        print(f"All {count} crash-before-game-over checks passed.",flush=True)
+        return
+    if args.opl_tuning_only:
+        if pcm_build:
+            parser.error('Use the OPL2-only build for --opl-tuning-only')
+        from opl_tuning_checks import run_opl_tuning_checks
+        run_opl_tuning_checks(case,sym,fixture,resume,output)
+        print(f"All {count} OPL tuning checks passed.",flush=True)
+        return
+    if args.bridge_selection_only:
+        from bridge_selection_checks import run_bridge_selection_checks
+        run_bridge_selection_checks(case,sym,boot,fixture,resume)
+        print(f"All {count} bridge selection checks passed.",flush=True)
+        return
+    if args.bridge_milestones_only:
+        from victory_checks import run_victory_progression_checks, run_victory_pcm_sequence_checks
+        run_victory_progression_checks(case,sym,boot,load_image)
+        if pcm_build:
+            run_victory_pcm_sequence_checks(case,sym,fixture,resume,dict(load_image.assets))
+        print(f"All {count} bridge milestone checks passed.",flush=True)
+        return
     if not pcm_build and any((args.audio_only,args.intro_only,args.music_only,
             args.gameover_only,args.victory_only,args.audio_switch_only,args.screens_only,args.controls_only)):
         parser.error('This suite requires --build build/cc65/release-pcm; use --opl-only for the default build')
@@ -889,40 +934,8 @@ def main():
     assert struct.unpack_from("<h",demo,4)[0]==222
     assert struct.unpack_from("<hh",logo_demo,0)==(0,232)
 
-    # A held F3 must advance once, update both native player states, and show
-    # the selected bridge using the real HUD sprites, including two digits.
-    commands=boot+["peek 0xbd 1"]
-    for level in (5,20,50,1):
-        commands += ["press f3", "run 67" if level==5 else "run 3", f"peek 0xbd {level}", f"peek 0xc2 {level}",
-                     f'peek 0x{sym["start_level"]:04x} {level}', "run 32",
-                     f"peek 0xbd {level}", "dump xram:0x060a 20",
-                     "release f3", "run 3"]
-    _, hud_numbers=case("bridge-difficulty-cycle",commands)
-    for level, sprites in zip((5,20,50,1),hud_numbers):
-        for digit in (0,1):
-            _,y,image,_,_,_=struct.unpack_from("<hhHHBB",sprites,digit*10)
-            assert image==0x9e00+(level//10 if digit==0 else level%10)*32
-            assert (y>=0)==(digit==1 or level>=10), "Incorrect BRIDGE digit visibility"
-
-    case("bridge-difficulty-paused-restart",fixture+[poke(0xcd+10,40),
-         "press f3", "run 3", "release f3", "run 3", "peek xram:0x0085 5",
-         "peek xram:0x008b 0", "peek xram:0x0090 88 88 88 88 88 0",
-         "press p", "run 3", "release p", "run 3",poke(0xbd,7),
-         "press r", "run 3", "release r", "run 3", "peek 0xbd 5", "peek 0xc2 5",
-         "peek xram:0x008b 0"])
-
-    commands=boot+["press f2", "run 2", "release f2", "run 2", "peek 0x80 1"]
-    for _ in range(2):
-        commands += ["press f3", "run 3", "release f3", "run 3"]
-    case("bridge-difficulty-two-players",commands+["run 65","peek 0xbd 20", "peek 0xc2 20",
-         "peek 0xf4 0", "press space", "wait 0xc6 0 180", "release space", "run 3",
-         "press p", "run 3", "release p", "run 3",
-         poke(0xb3,4)]+resume+["wait 0xf4 1 240", "wait 0xc6 48 300", "run 3",
-         "peek 0xbd 20", "peek 0xc2 20"])
-
-    case("bridge-difficulty-respawn",fixture+[poke(sym["start_level"],20),
-         poke(0xbd,50),poke(0xb3,4)]+resume+["wait 0xc6 48 300", "run 3",
-         "peek 0xbd 50"])
+    from bridge_selection_checks import run_bridge_selection_checks
+    run_bridge_selection_checks(case,sym,boot,fixture,resume)
 
     def object_at(block, kind, x=76):
         coarse, fine = divmod(x+1, 15)

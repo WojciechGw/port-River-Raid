@@ -6,7 +6,7 @@ from emulator_checks import poke
 def run_splash_scene_checks(case,sym,boot,fixture,resume,assets,pcm_build,output):
     kind=f'0x{sym["demo_splash_kind"]:04x}'
     phase=f'0x{sym["demo_splash_gameover_phase"]:04x}'
-    arrived=[f'wait {kind} 2 90','run 2']
+    arrived=[f'wait {kind} 2 120','run 2']
     frame=['dump xram:0x6500 4096','dump xram:0xd600 4096',
            'dump xram:0x7580 512','dump xram:0x7514 20']
     opening=['press f1','wait xram:0x00b0 2 120','release f1','wait xram:0x02a4 222 5']
@@ -80,7 +80,8 @@ def run_splash_scene_checks(case,sym,boot,fixture,resume,assets,pcm_build,output
     simultaneous=(duo,[poke(players+4,[0,0]),poke(players+27,[0,0])]+resume)
     for variant,(setup,trigger) in enumerate((solo,alternating,simultaneous),1):
         for muted in (0,3):
-            commands=setup+[poke(sym['audio_muted'],muted)]+trigger+['run 3',f'peek {phase} 1',f'peek {kind} 0']+frame
+            commands=setup+[poke(sym['audio_muted'],muted)]+trigger+[
+                f'peek {phase} 0',f'wait {phase} 1 60','run 3',f'peek {phase} 1',f'peek {kind} 0']+frame
             commands+=arrived+[f'peek {phase} 2']+frame
             if pcm_build and not muted:
                 # An unconsumed PCM score must keep GAME OVER visible even
@@ -105,7 +106,7 @@ def run_splash_scene_checks(case,sym,boot,fixture,resume,assets,pcm_build,output
         # verify the stream continues at the right file offset across swaps.
         for scene,start,samples in (
                 ('demo',boot+['run 15','press space','run 3','release space'],assets['flight-drums.pcm']),
-                ('gameover',fixture+last+resume+['run 3'],assets['gameover.pcm'])):
+                ('gameover',fixture+last+resume+[f'wait {phase} 1 60','run 3'],assets['gameover.pcm'])):
             commands=start
             for page in range(1,8):
                 commands += [f'poke xram:0xca06 0 {page%4}','run 2',

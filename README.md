@@ -39,6 +39,9 @@ planes. Audio uses OPL2 by default; the optional PCM build offers both backends,
 recording. Speed and throttle control the engine sound. PCM changes
 its noise bandwidth; OPL2 uses continuous broadband feedback noise with
 throttle-controlled volume to avoid pitched FM hum and beating.
+The OPL2-only build lowers the engine by about 15% and gives its noise clock
+a wider throttle range. Gameplay background music is about 5% louder;
+the adjustment applies to flight notes, including synthesized percussion.
 OPL2 uses nine channels to keep the engine playing
 alongside shots, blasts and fuel tones. Missiles descend in
 pitch, and explosions have a low body rather than metallic percussion.
@@ -48,8 +51,9 @@ size, using two 64x64 sprites with transparent black. The image moves at
 Starting play restores the plane and slides it off the left edge at 8 pixels per frame (about
 0.68 seconds from rest), accompanied by the engine effect while demo music
 continues. F9 OFF and pause silence the engine; SFX keeps it enabled.
-When GAME 1 runs out of planes, or both players run out in GAME 2/3, the plane
-flies in and changes to `splash_gameover.bmp`. It waits for the game-over tune
+When GAME 1 runs out of planes, or both players run out in GAME 2/3, the final
+plane's explosion plays first. Once its sound finishes, the game-over tune
+starts and the plane flies in and changes to `splash_gameover.bmp`. It waits for the game-over tune
 to finish, then leaves with the GAME OVER text. Only afterwards does a new
 plane enter and change to ARE YOU READY. With music muted or interrupted,
 the sequence uses the tune's nominal 6.7-second duration; pause/F1 freezes it.
@@ -66,13 +70,16 @@ quieter variation of the same theme, with syncopated bass, an alternating lead
 register and answering arpeggios. It keeps the same tempo and loop length.
 `tools/make_music.py` builds this arrangement and its percussion from the source
 score. Engine, shots, explosions and fuel warnings continue alongside it.
+During gameplay, PCM percussion plays at 72.25% of its demo level; melody and
+effects retain their levels.
 On exit, both OPL2 and PCM fade out with the farewell picture. F9 music mute also
 applies to music. In the PCM build, music uses OPL2 plus PCM when the firmware
 supports PCM, regardless of the gameplay option. The default OPL2 build plays
 both melody and synthesized percussion through OPL2. The same arrangement is
 used when PCM firmware support is unavailable, including victory and game-over jingles.
-The reduced arrangement reserves voices for effects; effects take priority
-over the engine when the fallback's shared voices are busy. Notes and instruments are in
+The reduced arrangement reserves voices for effects. In the OPL2-only build,
+the engine has a dedicated voice during flight; explosions take priority over
+the player's shot on a separate shared voice. Notes and instruments are in
 `src/intro-score.json`; `assets/intro-drums.pcm` holds the generated percussion.
 To reimport: `python tools/import_intro.py path/to/riverraid_rom_gen.py --bpm 140`.
 
@@ -83,11 +90,13 @@ GAME 2 and GAME 3 wait until both players run out. The jingle respects mute and
 returns to the flight arrangement after the jingle.
 To reimport: `python tools/import_gameover.py path/to/riverraid_gameover_rom_gen.py --bpm 200`.
 
-Destroying a bridge while the HUD shows BRIDGE 5, 20 or 50 plays the OPL2 + PCM victory fanfare from
-`riverraid_victory_rom_gen.py --bpm 96` (11.648 seconds). It also awards one extra
+Destroying a bridge while the HUD shows BRIDGE 50 plays the OPL2 + PCM victory fanfare from
+`riverraid_victory_rom_gen.py --bpm 96` (11.648 seconds). Bridges 5, 20 and 50 award one extra
 life to the current player in GAME 1/2, or to each player in GAME 3, including
 an eliminated player. The existing life limits apply. Muting sound does not
 disable the reward, and the regular score bonus remains independent.
+Destroying an ordinary bridge ends any fanfare still playing from the previous
+milestone and restores the flight music.
 To reimport: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --name victory --bpm 96`.
 Normal builds use the checked-in assets and do not require the firmware checkout.
 
@@ -190,7 +199,7 @@ unsupported by the port's code. The BASIC branch remains a template example.
 | Space or Enter | Fire; start a game or restart after game over |
 | F1 | Instructions (any key returns with a one-second fade-in; the game stays frozen until it finishes) |
 | F2 | SELECT: GAME 1 solo, GAME 2 alternating, GAME 3 DUO |
-| F3 | Start a new game at BRIDGE: 1 → 5 → 20 → 50 → 1 |
+| F3 | Choose starting BRIDGE: 5 → 10 → 15 → 20 → 25 → 30 → 35 → 40 → 45 → 49 → 1 (loop; GAME 1/2/3). Does not start or restart the game. |
 | F4 | Color / black and white |
 | F5 | Player 1: guided or straight missiles |
 | F8 | Player 2: guided or straight missiles |

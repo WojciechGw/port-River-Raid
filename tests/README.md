@@ -74,7 +74,17 @@ melodię i perkusję OPL bez PCM, nową aranżację podczas lotu oraz efekty
 na każdym backendzie. Testy porównują także dodatnie i ujemne próbki mieszane
 przez CPU, dwukrotne powtarzanie próbek efektów 8 kHz w strumieniu 16 kHz
 i zawijanie obu buforów. Sprawdzają F1, F9, wyciszanie wyjścia oraz oba jingle.
+Porównują również próbki perkusji: pełny poziom w demo i 72,25% podczas gry,
+z niezmienionym poziomem domieszanych efektów PCM.
 Kopia oryginalnych tabel `$CB00..$CFFF` jest porównywana bajt po bajcie.
+`python tests/emulator_checks.py --opl-engine-only` sprawdza ciągłość silnika
+OPL2 podczas wybuchów, strzałów gracza i przeciwnika oraz tankowania.
+Porównuje pełne rejestry brzmienia silnika z aktywnym kanałem muzycznym,
+priorytet wybuchu nad strzałem i powrót strzałów po wybrzmieniu wybuchu.
+`python tests/emulator_checks.py --outro-audio-only` sprawdza muzykę OPL2
+po Esc podczas lotu, pauzy, efektów, GAME OVER, fanfary i po F1. Weryfikuje
+uruchomienie odtwarzacza, zmiany nut i głośność kanałów oraz zachowanie
+wyciszenia muzyki przez F9 na ekranie outro.
 Podgląd nowej aranżacji można wygenerować przez `tools/preview_intro.py`,
 podając `flight-score.bin`, `--source flight-score.json` i
 `--drums flight-drums.pcm` z katalogu buildu oraz bibliotekę OPL.
@@ -108,6 +118,12 @@ oczekiwania na klawisz. Parser ROM sprawdza nazwane zasoby okładki, palet
 i napisu oraz brak automatycznego wczytywania okładki do XRAM.
 `python tests/emulator_checks.py --screens-only` uruchamia testy plansz.
 `python tests/emulator_checks.py --gameover-only` sprawdza melodię po utracie
+ostatniego samolotu, po wybrzmieniu wybuchu.
+`python tests/emulator_checks.py --gameover-delay-only` działa z OPL2 i PCM:
+porównuje dźwięk ostatniego wybuchu ze zwykłą utratą życia, sprawdza brak
+melodii i animacji GAME OVER podczas wybuchu, przerwanie fanfary przez wybuch,
+pauzę, F1 oraz anulowanie przez R i F2.
+Pełny zestaw GAME OVER obejmuje utratę
 ostatniego samolotu: GAME 1 oraz wyczerpanie samolotów obu graczy w GAME 2
 i GAME 3. W GAME 2 sprawdza też brak melodii, gdy drugi gracz ma jeszcze samoloty.
 Porównuje cały przebieg rejestrów OPL2 i każdą stronę PCM,
@@ -121,9 +137,16 @@ oba źródła strzału w GAME 3 i oba kolory drogi po zmianie etapu. Sprawdza do
 życia, limity, nagrodę przy wyciszeniu, niezależną premię punktową i brak
 podwójnej nagrody przy jednoczesnym trafieniu. Cały utwór jest porównywany
 z partyturą i PCM, łącznie ze zwolnieniem werbla oraz wybrzmieniem.
-Regresja `victory-natural-bridge5-hud` generuje dojazd w natywnym kodzie gry,
-pozwala HUD przejść z 4 na 5 i dopiero wtedy trafia most; kolor drogi nie może
-cofnąć numeru użytego do przyznania nagrody.
+`python tests/emulator_checks.py --bridge-milestones-only` działa z wersją OPL2
+oraz PCM. Regresje `victory-natural-bridge*-progression` generują dojazdy
+w natywnym kodzie gry i trafiają mosty 5, 20 i 50. Po mostach 5 i 20 kontynuują
+tę samą rozgrywkę przez dwa kolejne mosty, sprawdzając brak ponownej fanfary
+i dodatkowego życia. Numer mostu zmienia się przez naturalne przewijanie;
+kolor drogi nie może cofnąć numeru użytego do przyznania nagrody.
+Mosty 5 i 20 przyznają premię życia bez fanfary; fanfara gra tylko przy moście 50.
+Wersja PCM dodatkowo sprawdza mosty 1–50 w jednej rozgrywce z `/pcm`, pełne
+odtworzenie każdej fanfary przy zegarze 16 kHz, powrót partytury muzyki lotu
+oraz dokładnie jedno uruchomienie fanfary i trzy premie za mosty.
 Import: `python tools/import_gameover.py path/to/riverraid_victory_rom_gen.py --name victory --bpm 96`.
 Zawiera też intro; samo intro sprawdza opcja `--intro-only`. Test porównuje
 rejestry OPL2 i każdą stronę perkusji PCM przez pełny utwór i początek następnej
@@ -192,6 +215,14 @@ oraz opadanie pasma i głośności podczas eksplozji.
 dwóch bliskich prędkościach, aby wykryć skokowe sterowanie zegarami FM silnika.
 Szerokopasmowy szum OPL2 wykorzystuje maksymalne sprzężenie zwrotne i TL=1
 modulatora; jego reakcja na gaz polega głównie na zmianie głośności.
+`python tests/emulator_checks.py --opl-tuning-only` sprawdza wersję OPL2:
+silnik przy wolnym i szybkim locie, również w kanale dzielonym z muzyką,
+oraz pełną pętlę muzyki podczas gry. Zapisuje ślady `opl-tuning-*.json`.
+`python tools/check_opl_tuning.py --opl-library build/opl-engine-preview/opl-preview.dll`
+generuje odsłuchy i sprawdza brak tonalnych składowych, pulsowania oraz
+przesterowania. Opcjonalne `--baseline` wskazuje katalog śladów sprzed zmiany
+i sprawdza obniżenie poziomu silnika o około 15% oraz wzrost muzyki o około 5%.
+OPL2-only ma szerszy zakres zegara szumu (około 6,3:1), bez AM i vibrato.
 `audio-*-capture-engine-ramp` używa rzeczywistych klawiszy przyspieszania,
 zwalniania i ponownego przyspieszania.
 Scenariusze opcji obejmują domyślny OPL2, wybór `/opl2`, `/pcm`, `/auto`,
@@ -243,9 +274,12 @@ Zapisują także obrazy `sound-status-on-game*.png` i `sound-status-off-game*.pn
 Test `game2-player-hud-colors` sprawdza kolor etykiety, punktów i zapasowych
 samolotów po rzeczywistym przekazaniu tury P1 do P2, po F4 i powrocie z F1.
 Sprawdza też zachowanie koloru mostu i przezroczystość tła ikon żyć.
-Scenariusze `bridge-difficulty-*` sprawdzają cykl F3: 1 → 5 → 20 → 50 → 1,
-brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD, restart z pauzy,
-zachowanie wyboru przy R, poziomy obu graczy, odradzanie oraz przejście 49 → 50.
+`python tests/emulator_checks.py --bridge-selection-only` uruchamia scenariusze
+`bridge-difficulty-*`: cykl F3 5 → 10 → 15 → 20 → 25 → 30 → 35 → 40 → 45 → 49 → 1
+we wszystkich trzech trybach gry,
+brak powtarzania przy przytrzymaniu klawisza, cyfry BRIDGE w HUD oraz brak
+automatycznego startu. Sprawdzają osobny start po wyborze, zachowanie gry
+i pauzy przy F3, restart przez R, poziomy obu graczy oraz odradzanie.
 `maximum-level-wrap` sprawdza powrót 50 → 49 przy nowym limicie.
 Scenariusze `demo-footer-*` sprawdzają ruch napisu o piksel na klatkę,
 zawijanie po całym przebiegu, jasnoszarą paletę także po aktywacji wygaszacza,

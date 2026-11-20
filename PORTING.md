@@ -32,9 +32,12 @@ In GAME 2, the active player's P1/P2 label, score and reserve planes share
 the aircraft color, including after a turn change or return from F1.
 BRIDGE, its number and the high-score display retain their existing colors.
 
-F3 selects the starting bridge in the cycle 1 → 5 → 20 → 50 → 1 and starts
-a new game. The selection applies to both players and remains active when
-restarting with R. Full initialization applies the selected level, while
+F3 selects the starting bridge in the cycle 5 → 10 → 15 → 20 → 25 → 30 → 35 → 40 → 45 → 49 → 1
+(loop) in GAME 1, 2 or 3, without starting or restarting the game. The selection
+screen HUD shows the chosen bridge; an active game keeps its current bridge
+and pause state. Fire or Start launches from the selection screen; R starts
+a new game at the chosen bridge. The selection applies to both players.
+Full initialization applies the selected level, while
 respawning and player switching preserve each player's current section.
 In the executable copy of the routines, the level limit was increased from
 48 to 50; after section 50, the generator returns to 49. The original ROM
@@ -315,11 +318,20 @@ to 63 while each PCM page is scaled by the picture level before publication.
 
 Flight music reserves melodic voices 0..2. With PCM, percussion uses a separate
 16 kHz ring, leaving OPL voices 3/4/7/8 for engine/blast/shot/fuel. Without PCM,
-three decaying FM voices supply percussion. Effects share 6..8, with blasts
-taking precedence over the engine. PCM effects
+three decaying FM voices supply percussion. In the OPL2-only build, effects use
+6 for the engine, 7 for blast/player shot (blast priority), and 8 for enemy shot
+or fuel tone. The engine retains its patch, volume and pitch through effects.
+The PCM build's legacy fallback still shares 6 between blast and engine.
+PCM effects
 retain their 8 kHz procedural ring; `music_mix_pcm` consumes each sample twice
 at half gain into the 16 kHz percussion page before publishing it. It advances
 the effects read pointer itself because firmware consumes only the music ring.
+Before mixing effects, gameplay flight percussion is scaled to 72.25% (two
+successive 15% reductions, rounded only once) using a
+signed 8-bit lookup table with symmetric rounding. This applies with either
+effects backend in the PCM build, only while `_ready == 0` and the flight tune
+is active. Demo, cover/manual/outro, jingles and the OPL fallback retain their
+existing levels; effects are added after scaling so their gain is unchanged.
 After fade in, the program waits for any HID key, including function keys
 and modifiers; LED status bits do not dismiss the cover. The dismissal key
 is consumed through its release so it cannot also trigger game controls.
@@ -376,8 +388,9 @@ is transparent. Entry starts immediately at X=320 and moves left by 2 pixels
 per live demo frame, reaching X=200 after 60 frames. A start request switches
 to 8 pixels per frame until X=-128; only then does actual play begin.
 The plane image is used for both slides; the ready image replaces it at rest.
-The final-life event starts a separate plane entry before the music mute test,
-for the sole player in GAME 1 or after both players run out in GAME 2/3.
+After the final explosion sound ends, the final-life event starts a separate
+plane entry before the music mute test, for the sole player in GAME 1 or after
+both players run out in GAME 2/3.
 At X=200 it changes to GAME OVER and holds. The score terminator signals the
 actual end of the jingle; an active PCM score is never replaced by a wall-clock
 timeout. Muted or interrupted audio falls back to 403 unpaused frames from
@@ -488,7 +501,12 @@ The final-plane jingle uses the firmware generator's exact
 OPL2 register writes and signed 16 kHz PCM at 200 BPM, including the last-bar
 slowdown. GAME 1 detects the player's final death; GAME 2 requires both native
 life pointers to indicate elimination, and GAME 3 requires both life counters
-to reach zero. It plays once, then resumes the flight arrangement.
+to reach zero. Both the tune and the GAME OVER entrance wait for the native
+plane-explosion envelope (`sound0Id=1`) to finish, about half a second.
+A running victory fanfare releases the audio channels immediately so that
+it cannot suppress this final crash. Pause/F1 freeze the crash countdown;
+restart or mode selection cancels the pending scene through the native state.
+The game-over tune plays once, then resumes the flight arrangement.
 Mute, pause, restart, help and backend/mode changes cancel playback. An automatic
 GAME 2 turn change does not trigger it while the other pilot has planes left.
 With no PCM support, VSYNC clocks a complete OPL2 arrangement with drums.
@@ -503,8 +521,9 @@ The installed overlay also holds the DUO fuel-row renderer, which is first
 used after selecting GAME 3. Before a flight starts, both DUO HUD panels show
 three planes and full fuel; an active flight uses the actual player state.
 
-The native bridge destruction path queues the victory fanfare when the HUD's
-BRIDGE number is 5, 20 or 50. Native scrolling can advance that number before
+The native bridge destruction path queues a life reward when the HUD's
+BRIDGE number is 5, 20 or 50; only BRIDGE 50 plays the victory fanfare.
+Native scrolling can advance that number before
 destruction; the hook uses the visible number without a parity-based rollback.
 The object changes to an explosion before the hook, so simultaneous DUO shots
 cannot award twice. After both DUO contexts are saved, the reward adds one
@@ -513,13 +532,27 @@ at nine classic reserves / ten DUO planes. An eliminated DUO pilot returns to
 the normal waiting-for-bridge state. Score bonuses remain independent, and
 mute suppresses only playback. The 96 BPM OPL2 + PCM arrangement preserves the
 generator's broadening snare roll and final release. A final death interrupts
-victory playback with the game-over jingle.
+victory playback with the game-over jingle. Destroying an ordinary bridge
+also ends a still-playing victory fanfare and resumes flight music; the next
+bridge can arrive before the 11.648-second tune has finished.
 
-OPL2 uses all nine melodic channels. Four engine channels use deep FM without
-feedback, a 3:1 modulator/carrier ratio and independent dither in overlapping
-bands. The lower oscillator octave packs the sidebands more closely for a
-smoother noise texture. Frequency follows the full speed accumulator over an
-almost 3:1 range, with 0.095 Hz register resolution in the engine bands.
+OPL2 uses all nine melodic channels. Four engine channels use maximum FM
+feedback, modulator TL=1, a 3:1 modulator/carrier ratio and independently
+varied clocks. The feedback produces continuous broadband noise. The noise
+clock follows the full speed accumulator, with 0.095 Hz register resolution
+in the engine bands. In the OPL2-only build its range is about 6.3:1, and two
+extra carrier TL steps reduce engine amplitude to 84.1% (about 15% quieter).
+The PCM build retains its previous OPL fallback settings.
+
+The OPL2-only flight sequencer raises 142 of every 256 note events by one TL
+step, only while playing. This gives an average gain near 1.05 while keeping
+each sustained note at a fixed volume. Demo, intro and fanfares retain their
+levels. The 0.75 dB TL step is specified in the
+[YM3812 application manual](https://c64.xentax.com/media/Yamaha_YM3812_Application_Manual.pdf).
+CPU-captured traces rendered through emu8950 measured engine gains of
+0.840–0.842 and a full flight-music gain of 1.053, without clipping. These are
+model measurements, not recordings from the physical computer.
+
 Three separate blast channels use a deeper 2:1 FM ratio; their noise bandwidth
 falls with the native volume decay, from the initial impact into a low rumble.
 No cymbal/hi-hat rhythm voices
@@ -552,7 +585,9 @@ the standard [RIA sound interfaces](https://picocomputer.github.io/ria.html#yama
 
 All backends preserve refueling/alarm sequences. Missiles descend from
 about 400 to 200 Hz over 18 frames (0.3 seconds). OPL2 keeps the engine,
-missile, blast and fuel tone on separate voices, so they can play together.
+missile, blast and fuel tone on separate voices when music is disabled. With
+flight music in the OPL2-only build, the engine keeps its own voice while
+blasts take priority over missiles on channel 7.
 PCM retains its two-voice priority: bridge explosions override missiles.
 Bank and road tanks trigger a descending 200-to-100 Hz shot; firing helicopters
 use 800-to-400 Hz. Both use an 18-frame decaying envelope, triggered only when

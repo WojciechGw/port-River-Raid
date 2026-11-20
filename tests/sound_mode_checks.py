@@ -44,9 +44,12 @@ def run_sound_mode_checks(case,sym,boot,fixture,resume,pcm_build):
             setup=fixture+tap*{0:0,1:1,3:2}[state]
             if victory:
                 setup += [poke(sym['tanks'],[0]*30),poke(0xa2,8),poke(0x96,4),poke(0x9c,0x37),
-                    poke(0xb5,0),'press down',poke(0xb2,75),poke(0xf5,80),poke(0xbd,5),poke(0x90,128)]
+                    poke(0xb5,0),'press down',poke(0xb2,75),poke(0xf5,80),poke(0xbd,50),poke(0x90,128)]
             else: setup += [poke(0xc0,sym['rr_Copyright0']&255),poke(0xb3,4)]
-            commands=setup+resume+[mode+f' {state}',music+f' {int(not state&1)}']
+            commands=setup+resume
+            if not victory:
+                commands += [f'wait 0x{sym["demo_splash_gameover_phase"]:04x} 1 60','run 2']
+            commands += [mode+f' {state}',music+f' {int(not state&1)}']
             if not state&1: commands += [kind+f' {int(victory)}']
             if victory: commands += ['peek 0xc0 32']
             case(f'f9-state-{state}-'+('victory' if victory else 'gameover'),commands)

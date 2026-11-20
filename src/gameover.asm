@@ -28,6 +28,9 @@ OPL = $C900
 
 .segment "BSS"
 installed: .res 1
+.if !RIVER_PCM
+flight_gain_error: .res 1
+.endif
 .segment "ZEROPAGE"
 copy_code: .res 33
 active = copy_code
@@ -136,7 +139,20 @@ update:
     lda pending
     beq @death
     stz pending
+    cmp #1
+    beq @reward
+    ; A fast pilot can reach another bridge before the fanfare ends.
+    ; Finish that celebration on an ordinary bridge, then resume flight.
+    lda kind
+    cmp #1
+    bne @death
+    jsr stop
+    bra @death
+@reward:
     jsr award
+    lda $bd
+    cmp #50                 ; Earlier milestones grant lives without a fanfare.
+    bne @death
     lda _audio_muted
     and #1
     ora _paused
@@ -145,7 +161,7 @@ update:
     lda #1
     jsr start
 @death:
-    ; Detect the death immediately, before the explosion changes to demo.
+    ; Keep the final crash audible before handing audio/video to GAME OVER.
     ldy #0
     lda _ready
     bne @candidate
@@ -174,6 +190,8 @@ update:
     ora _duo_players+43
     beq @candidate
 @last:
+    jsr wait_crash
+    bcs @candidate
     iny
 @candidate:
     lda latched
@@ -298,6 +316,27 @@ finish:
     bra idle
 
 .segment "MUSIC"
+; Carry set while the native plane-explosion envelope is still running.
+wait_crash:
+    lda $f8                   ; Native sound0Id: 1 = the plane explosion.
+    cmp #1
+    bne @done
+    ; A victory fanfare suppresses effects. Release it so the final crash
+    ; can use the normal effects path while GAME OVER waits.
+    lda active
+    beq @waiting
+    lda kind
+    cmp #1
+    bne @waiting
+    jsr finish
+    ldy #0
+@waiting:
+    sec
+    rts
+@done:
+    clc
+    rts
+
 sequence_end:
     lda kind
     bne :+
@@ -308,6 +347,9 @@ sequence_end:
 
 start:
     sta kind
+.if !RIVER_PCM
+    stz flight_gain_error
+.endif
     jsr _audio_stop
     lda kind
     cmp #2
@@ -535,11 +577,13 @@ _victory_bridge:
     cpy #20
     beq @reward
     cpy #50
-    bne @done
+    beq @reward
+    lda #2                  ; Ordinary bridge ends any previous fanfare.
+    bra @queue
 @reward:
     lda #1
+@queue:
     sta pending
-@done:
     ply
     pla
     plp
@@ -651,6 +695,24 @@ music_sequence:
     adc #$43
     sta RIA_ADDR0
     lda RIA_RW1
+.if !RIVER_PCM
+    ; OPL levels are quantized in 0.75 dB steps. Raise 142/256 note events
+    ; by one step for an average +5%, only during actual gameplay. Keeping
+    ; each note's gain constant avoids frame-rate volume modulation.
+    ldy _ready
+    bne @level
+    tay
+    lda flight_gain_error
+    clc
+    adc #142
+    sta flight_gain_error
+    tya
+    bcc @level
+    cmp #0
+    beq @level
+    dec a
+@level:
+.endif
     sta RIA_RW0
     txa
     ora #$a0
